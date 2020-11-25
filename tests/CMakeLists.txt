@@ -15,7 +15,7 @@ set(files
 foreach(file ${files})
     get_filename_component(testcase ${file} NAME_WE)
     add_executable(${testcase} ${file} $<TARGET_OBJECTS:unittest_main>)
-    target_link_libraries(${testcase} nunchuk)
+    target_link_libraries(${testcase} -Wl,--start-group nunchuk)
     target_include_directories(${testcase} PUBLIC "${PROJECT_SOURCE_DIR}/src")
     add_test(NAME ${testcase} COMMAND ${testcase})
 endforeach()
