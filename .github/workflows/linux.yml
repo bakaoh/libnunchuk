@@ -17,15 +17,18 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     
+    - name: Checkout submodules
+      run: git submodule update --init --recursive
+
     - name: Install packages
       uses: ryankurte/action-apt@v0.2.0
       with:
         packages: libevent-dev libdb-dev libdb++-dev build-essential libtool autotools-dev automake pkg-config bsdmainutils python3
 
     - name: Build Bitcoin Core
+      working-directory: ./contrib/bitcoin
       run: |
         ls -R
-        cd contrib/bitcoin
         ./autogen.sh
         ./configure --without-gui --disable-zmq --with-miniupnpc=no --with-incompatible-bdb
         make -j
