@@ -22,9 +22,9 @@ jobs:
       with:
         packages: libevent-dev libdb-dev libdb++-dev build-essential libtool autotools-dev automake pkg-config bsdmainutils python3
 
-    - name: Build bitcoin core
+    - name: Build Bitcoin Core
       shell: bash
-      working-directory: contrib/bitcoin
+      working-directory: ./contrib/bitcoin
       run: |
         ./autogen.sh
         ./configure --without-gui --disable-zmq --with-miniupnpc=no --with-incompatible-bdb
