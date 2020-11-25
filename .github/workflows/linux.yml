@@ -25,7 +25,7 @@ jobs:
        
     - name: Checkout submodules
       if: steps.cache.outputs.cache-hit != 'true'
-      run: git submodule update --depth --init --recursive
+      run: git submodule update --depth 1 --init --recursive
 
     - name: Build Bitcoin Core
       if: steps.cache.outputs.cache-hit != 'true'
