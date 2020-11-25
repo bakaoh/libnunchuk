@@ -24,7 +24,7 @@ jobs:
 
     - name: Build bitcoin core
       shell: bash
-      working-directory: ${{runner.workspace}}/libnunchuk/contrib/bitcoin
+      working-directory: contrib/bitcoin
       run: |
         ./autogen.sh
         ./configure --without-gui --disable-zmq --with-miniupnpc=no --with-incompatible-bdb
