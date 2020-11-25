@@ -15,7 +15,7 @@ jobs:
     - name: Install packages
       uses: ryankurte/action-apt@v0.2.0
       with:
-        packages: sqlcipher libboost-all-dev libevent-dev libdb-dev libdb++-dev build-essential libtool autotools-dev automake pkg-config bsdmainutils python3
+        packages: sqlcipher libboost-all-dev libevent-dev libssl-dev libdb-dev libdb++-dev build-essential libtool autotools-dev automake pkg-config bsdmainutils python3
 
     - uses: actions/cache@v2
       id: cache
@@ -33,6 +33,13 @@ jobs:
       run: |
         ./autogen.sh
         ./configure --without-gui --disable-zmq --with-miniupnpc=no --with-incompatible-bdb
+        make -j8
+
+    - name: Build SqlCipher
+      if: steps.cache.outputs.cache-hit != 'true'
+      working-directory: ./contrib/sqlcipher
+      run: |
+        ./configure --enable-tempstore=yes CFLAGS="-DSQLITE_HAS_CODEC" LDFLAGS="-lcrypto"
         make -j8
 
     - name: Create Build Environment
