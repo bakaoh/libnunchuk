@@ -2073,8 +2073,7 @@ RequestTokens NunchukWalletDb::SaveDummyTxRequestToken(
         auto amountIn = input.witness_utxo.nValue;
         CScript scriptCode = input.witness_script;
         const CMutableTransaction& tx = *dummyPsbt.tx;
-        const PrecomputedTransactionData txdata = PrecomputePSBTData(dummyPsbt);
-        MutableTransactionSignatureCreator creator(&tx, 0, amountIn, &txdata);
+        MutableTransactionSignatureCreator creator(tx, 0, amountIn, SIGHASH_DEFAULT);
 
         auto pair = split(token, '.');
         for (const auto& key : input.hd_keypaths) {
