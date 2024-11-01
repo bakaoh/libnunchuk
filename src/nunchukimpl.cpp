@@ -1114,6 +1114,7 @@ Transaction NunchukImpl::SignTransaction(const std::string& wallet_id,
           }
         }
         signed_psbt = software_signer.SignTaprootTx(
+            {chain_, {}, "/home/bringer/libnunchuk/examples/playground.cpp/tmp/local.sqlite", {}},
             psbt, basepath, wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL),
             wallet.get_descriptor(DescriptorPath::INTERNAL_ALL),
             storage_->GetCurrentAddressIndex(chain_, wallet_id, false),
@@ -1189,6 +1190,7 @@ Transaction NunchukImpl::SignTransaction(const Wallet& wallet,
           }
         }
         signed_psbt = software_signer.SignTaprootTx(
+            {chain_, {}, "/home/bringer/libnunchuk/examples/playground.cpp/tmp/local.sqlite", {}},
             psbt, basepath, wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL),
             wallet.get_descriptor(DescriptorPath::INTERNAL_ALL),
             storage_->GetCurrentAddressIndex(chain_, wallet.get_id(), false),
