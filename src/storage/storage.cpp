@@ -327,6 +327,10 @@ bfs::path NunchukStorage::GetPrimaryDir(Chain chain) const {
   return basedatadir_ / ChainStr(chain) / "primary";
 }
 
+bfs::path NunchukStorage::GetLocalDir(Chain chain) const {
+  return basedatadir_ / ChainStr(chain) / "local";
+}
+
 bfs::path NunchukStorage::GetRoomDir(Chain chain) const {
   return datadir_ / ChainStr(chain) / "room";
 }
@@ -367,6 +371,14 @@ NunchukPrimaryDb NunchukStorage::GetPrimaryDb(Chain chain) {
   bfs::path db_file = GetPrimaryDir(chain);
   bool is_new = !bfs::exists(db_file);
   auto db = NunchukPrimaryDb{chain, "", db_file.string(), ""};
+  db.Init();
+  return db;
+}
+
+NunchukLocalDb NunchukStorage::GetLocalDb(Chain chain) {
+  bfs::path db_file = GetLocalDir(chain);
+  bool is_new = !bfs::exists(db_file);
+  auto db = NunchukLocalDb{chain, "", db_file.string(), ""};
   db.Init();
   return db;
 }

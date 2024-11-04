@@ -1082,6 +1082,14 @@ Transaction NunchukImpl::ImportTransaction(const std::string& wallet_id,
   return ImportPsbt(wallet_id, psbt);
 }
 
+void NunchukImpl::SetPreferScriptPath(const Wallet& wallet, const std::string& tx_id, bool value) {
+  storage_->GetLocalDb(chain_).SetPreferScriptPath(tx_id, value);
+}
+
+bool NunchukImpl::IsPreferScriptPath(const Wallet& wallet, const std::string& tx_id) {
+  return storage_->GetLocalDb(chain_).IsPreferScriptPath(tx_id);
+}
+
 Transaction NunchukImpl::SignTransaction(const std::string& wallet_id,
                                          const std::string& tx_id,
                                          const Device& device) {
@@ -1114,7 +1122,7 @@ Transaction NunchukImpl::SignTransaction(const std::string& wallet_id,
           }
         }
         signed_psbt = software_signer.SignTaprootTx(
-            {chain_, {}, "/home/bringer/libnunchuk/examples/playground.cpp/tmp/local.sqlite", {}},
+            storage_->GetLocalDb(chain_),
             psbt, basepath, wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL),
             wallet.get_descriptor(DescriptorPath::INTERNAL_ALL),
             storage_->GetCurrentAddressIndex(chain_, wallet_id, false),
@@ -1190,7 +1198,7 @@ Transaction NunchukImpl::SignTransaction(const Wallet& wallet,
           }
         }
         signed_psbt = software_signer.SignTaprootTx(
-            {chain_, {}, "/home/bringer/libnunchuk/examples/playground.cpp/tmp/local.sqlite", {}},
+            storage_->GetLocalDb(chain_),
             psbt, basepath, wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL),
             wallet.get_descriptor(DescriptorPath::INTERNAL_ALL),
             storage_->GetCurrentAddressIndex(chain_, wallet.get_id(), false),
