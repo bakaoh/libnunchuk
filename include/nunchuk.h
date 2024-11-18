@@ -583,6 +583,9 @@ class NUNCHUK_EXPORT UnspentOutput {
   CoinStatus status_;
 };
 
+typedef std::map<std::string, bool> KeyStatus;   // xfp-signed map
+typedef std::pair<TransactionStatus, KeyStatus> KeysetStatus;
+
 // Class that represents a Transaction
 class Transaction {
  public:
@@ -599,6 +602,7 @@ class Transaction {
   std::map<std::string, bool> const& get_signers() const;
   std::string get_memo() const;
   TransactionStatus get_status() const;
+  std::vector<KeysetStatus> const& get_keyset_status() const;
   std::string get_replaced_by_txid() const;
   std::string get_replace_txid() const;
   Amount get_fee() const;
@@ -624,6 +628,7 @@ class Transaction {
   void set_signer(const std::string& signer_id, bool has_signature);
   void set_memo(const std::string& value);
   void set_status(TransactionStatus value);
+  void set_keyset_status(const std::vector<KeysetStatus>& value);
   void set_replaced_by_txid(const std::string& value);
   void set_replace_txid(const std::string& value);
   void set_fee(const Amount& value);
@@ -650,6 +655,7 @@ class Transaction {
   std::map<std::string, bool> signers_;
   std::string memo_;
   TransactionStatus status_;
+  std::vector<KeysetStatus> keyset_status_;
   std::string replaced_by_txid_;
   std::string replace_txid_;
   Amount fee_;
