@@ -1050,10 +1050,6 @@ std::string NunchukWalletDb::FillPsbt(const std::string& base64_psbt) {
   auto psbt = DecodePsbt(base64_psbt);
   if (!psbt.tx.has_value()) return base64_psbt;
 
-  auto wallet = GetWallet(true);
-  auto desc = GetDescriptorsImportString(wallet);
-  auto provider = SigningProviderCache::getInstance().GetProvider(desc);
-
   int nin = psbt.tx.value().vin.size();
   for (int i = 0; i < nin; i++) {
     std::string tx_id = psbt.tx.value().vin[i].prevout.hash.GetHex();
@@ -1069,6 +1065,46 @@ std::string NunchukWalletDb::FillPsbt(const std::string& base64_psbt) {
       psbt.inputs[i].witness_utxo.SetNull();
     }
     SQLCHECK(sqlite3_finalize(stmt));
+  }
+
+  // auto desc = GetDescriptorsImportString(wallet);
+  // auto provider = SigningProviderCache::getInstance().GetProvider(desc);
+  FlatSigningProvider provider;
+  std::vector<CScript> scripts;
+  for (int i = 0; i < psbt.inputs.size(); i++) {
+    auto input = psbt.inputs[i];
+    auto ctxout = input.witness_utxo;
+    if (input.non_witness_utxo) {
+      auto txIn = input.non_witness_utxo.get();
+      auto txSpend = CMutableTransaction(*txIn);
+      ctxout = txSpend.vout[psbt.tx.value().vin[i].prevout.n];
+    }
+    if (ctxout.IsNull()) continue;
+    scripts.push_back(ctxout.scriptPubKey);
+  }
+
+  for (auto&& output : psbt.tx.value().vout) {
+    scripts.push_back(output.scriptPubKey);
+  }
+
+  auto wallet = GetWallet(true);
+  std::string error;
+  std::vector<CScript> output_scripts;
+  auto ext_desc = Parse(wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL),
+                        provider, error, true);
+  auto int_desc = Parse(wallet.get_descriptor(DescriptorPath::INTERNAL_ALL),
+                        provider, error, true);
+
+  auto allAddr = GetAllAddressData();
+  for (auto&& script : scripts) {
+    CTxDestination address;
+    ExtractDestination(script, address);
+    auto addr = EncodeDestination(address);
+    if (allAddr.count(addr)) {
+      (allAddr[addr].internal ? int_desc : ext_desc)
+          .front()
+          ->Expand(allAddr[addr].index, provider, scripts, provider);
+    }
   }
 
   const PrecomputedTransactionData txdata = PrecomputePSBTData(psbt);
