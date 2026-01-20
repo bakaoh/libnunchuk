@@ -325,7 +325,7 @@ inline std::vector<XOnlyPubKey> DeriveSilentPaymentOutputs(
   
   // Calculate sum of input private keys: a_sum = sum(a_i) mod n
   // According to BIP-352: if input is x-only pubkey with odd y, negate the private key
-  // Use secp256k1_ec_privkey_tweak_add to sum private keys
+  // Use secp256k1_ec_seckey_tweak_add to sum private keys
   unsigned char a_sum[32] = {0};
   bool first_key = true;
   for (size_t i = 0; i < input_privkeys.size(); i++) {
@@ -369,7 +369,7 @@ inline std::vector<XOnlyPubKey> DeriveSilentPaymentOutputs(
       first_key = false;
     } else {
       // Subsequent keys: add using tweak_add
-      if (!secp256k1_ec_privkey_tweak_add(ctx, a_sum, key_bytes)) {
+      if (!secp256k1_ec_seckey_tweak_add(ctx, a_sum, key_bytes)) {
         secp256k1_context_destroy(ctx);
         return outputs;
       }
@@ -406,7 +406,7 @@ inline std::vector<XOnlyPubKey> DeriveSilentPaymentOutputs(
   // First multiply a_sum by input_hash
   unsigned char input_hash_bytes[32];
   memcpy(input_hash_bytes, input_hash.begin(), 32);
-  if (!secp256k1_ec_privkey_tweak_mul(ctx, a_sum, input_hash_bytes)) {
+  if (!secp256k1_ec_seckey_tweak_mul(ctx, a_sum, input_hash_bytes)) {
     secp256k1_context_destroy(ctx);
     return outputs;
   }
