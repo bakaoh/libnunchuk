@@ -167,8 +167,6 @@ class WallySigner {
     CHECK_WALLY(wally_tx_get_num_outputs(tx, &num_outputs));
 
     for (size_t vout = 0; vout < num_outputs; vout++) {
-      // libwally exposes `struct wally_tx`/`struct wally_tx_output`, so just
-      // read members.
       const auto& txout = tx->outputs[vout];
       if (!txout.script || txout.script_len != ourScriptPubKey.size()) continue;
       std::vector<unsigned char> script(txout.script,
@@ -201,35 +199,16 @@ class WallySigner {
           asset_out.size(), abf_out.data(), abf_out.size(), vbf_out.data(),
           vbf_out.size(), &value_out));
 
-      // Auto-detect asset-id byte order expected by generator_from_bytes by
-      // matching generator to the txout asset commitment
-      std::vector<unsigned char> asset_id_a(asset_out.begin(), asset_out.end());
-      std::vector<unsigned char> asset_id_b(asset_out.rbegin(),
-                                            asset_out.rend());
-
-      std::vector<unsigned char> gen_a(ASSET_GENERATOR_LEN);
-      std::vector<unsigned char> gen_b(ASSET_GENERATOR_LEN);
+      std::vector<unsigned char> asset_id(asset_out.begin(), asset_out.end());
+      std::vector<unsigned char> asset_generator(ASSET_GENERATOR_LEN);
       CHECK_WALLY(wally_asset_generator_from_bytes(
-          asset_id_a.data(), asset_id_a.size(), abf_out.data(), abf_out.size(),
-          gen_a.data(), gen_a.size()));
-      CHECK_WALLY(wally_asset_generator_from_bytes(
-          asset_id_b.data(), asset_id_b.size(), abf_out.data(), abf_out.size(),
-          gen_b.data(), gen_b.size()));
-
-      const bool a_matches = (asset_commitment.size() == gen_a.size() &&
-                              std::memcmp(asset_commitment.data(), gen_a.data(),
-                                          gen_a.size()) == 0);
-      const bool b_matches = (asset_commitment.size() == gen_b.size() &&
-                              std::memcmp(asset_commitment.data(), gen_b.data(),
-                                          gen_b.size()) == 0);
-      if (!a_matches && !b_matches) {
+          asset_id.data(), asset_id.size(), abf_out.data(), abf_out.size(),
+          asset_generator.data(), asset_generator.size()));
+      if (asset_commitment != asset_generator) {
         wally_tx_free(tx);
         throw std::runtime_error(
-            "asset_generator mismatch with asset_commitment (asset_id byte "
-            "order unknown)");
+            "asset_generator mismatch with asset_commitment");
       }
-      const auto& asset_id = a_matches ? asset_id_a : asset_id_b;
-      const auto& asset_generator = a_matches ? gen_a : gen_b;
 
       // Recompute and sanity-check value commitment
       std::vector<unsigned char> recomputed_value_commitment(
@@ -238,11 +217,7 @@ class WallySigner {
           value_out, vbf_out.data(), vbf_out.size(), asset_generator.data(),
           asset_generator.size(), recomputed_value_commitment.data(),
           recomputed_value_commitment.size()));
-      if (value_commitment_from_tx.size() !=
-              recomputed_value_commitment.size() ||
-          std::memcmp(value_commitment_from_tx.data(),
-                      recomputed_value_commitment.data(),
-                      recomputed_value_commitment.size()) != 0) {
+      if (value_commitment_from_tx != recomputed_value_commitment) {
         wally_tx_free(tx);
         throw std::runtime_error(
             "value_commitment mismatch: unblind factors don't recompute "
@@ -326,7 +301,6 @@ class WallySigner {
     if (destinationConfAddrs.empty())
       throw std::runtime_error("destinationConfAddrs must be non-empty");
 
-    const std::vector<unsigned char> EMPTY;
     const std::vector<unsigned char> ZERO32(32, 0);
 
     // Merge
