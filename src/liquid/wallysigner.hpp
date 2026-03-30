@@ -14,7 +14,7 @@
 namespace nunchuk::wally {
 
 struct LiquidUtxos {
-  std::vector<unsigned char> prevTxid;             // 32 bytes (internal order)
+  std::vector<unsigned char> tx_id;                // 32 bytes (internal order)
   std::vector<unsigned char> asset_generators_in;  // 33*num
   std::vector<unsigned char> asset_ids_in;         // 32*num
   std::vector<uint64_t> values_in;                 // satoshis
@@ -104,9 +104,8 @@ class WallySigner {
         WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
     CHECK_WALLY(wally_tx_from_hex(txHex.c_str(), txflags, &tx));
 
-    out.prevTxid.resize(32);
-    CHECK_WALLY(
-        wally_tx_get_txid(tx, out.prevTxid.data(), out.prevTxid.size()));
+    out.tx_id.resize(32);
+    CHECK_WALLY(wally_tx_get_txid(tx, out.tx_id.data(), out.tx_id.size()));
 
     size_t num_outputs = 0;
     CHECK_WALLY(wally_tx_get_num_outputs(tx, &num_outputs));
@@ -225,9 +224,9 @@ class WallySigner {
                                   u.value_commitments_in.end());
       vouts_in.insert(vouts_in.end(), u.vouts_in.begin(), u.vouts_in.end());
 
-      // One prevTxid per input (matching JS: u.vouts_in.map(() => u.prevTxid))
+      // One tx_id per input
       for (size_t k = 0; k < u.vouts_in.size(); k++)
-        input_prev_txid_for_vin.push_back(u.prevTxid);
+        input_prev_txid_for_vin.push_back(u.tx_id);
     }
 
     const size_t num_inputs = values_in.size();
@@ -604,10 +603,10 @@ class WallySigner {
 
     // Inputs spending prevouts
     for (size_t vin = 0; vin < num_inputs_combined; vin++) {
-      const auto& prevTxid = combined_input_prev_txid_for_vin[vin];
+      const auto& prev_tx_id = combined_input_prev_txid_for_vin[vin];
       CHECK_WALLY(wally_tx_add_elements_raw_input(
-          output_tx, prevTxid.data(), prevTxid.size(), combined_vouts_in[vin],
-          0xffffffff, nullptr,
+          output_tx, prev_tx_id.data(), prev_tx_id.size(),
+          combined_vouts_in[vin], 0xffffffff, nullptr,
           0,           // script + script_len
           nullptr,     // witness
           nullptr, 0,  // nonce + nonce_len
