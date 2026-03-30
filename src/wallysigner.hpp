@@ -27,10 +27,8 @@ struct LiquidUtxos {
 };
 
 struct AddressDetail {
+  uint32_t index;
   std::string address;
-  std::string confidential_address;
-  std::vector<unsigned char> private_blinding_key;
-  std::vector<unsigned char> public_blinding_key;
 };
 
 class WallySigner {
@@ -54,6 +52,13 @@ class WallySigner {
 
   ~WallySigner() { bip32_key_free(master_); }
 
+  void CacheAddress(uint32_t index) {
+    std::string address = GetAddress(index);
+    std::vector<unsigned char> script_pubkey =
+        WallyUtils::GetScriptPubkeyFromAddress(address);
+    spk_.emplace(script_pubkey, AddressDetail{index, address});
+  }
+
   std::string GetAddress(uint32_t index) {
     struct ext_key* derived = nullptr;
     CHECK_WALLY(bip32_key_from_parent_alloc(master_, index,
@@ -67,14 +72,12 @@ class WallySigner {
     return rs;
   }
 
-  std::vector<unsigned char> GetPrivateBlindingKey(const std::string& address) {
-    std::vector<unsigned char> script_pubkey =
-        WallyUtils::GetScriptPubkeyFromAddress(address);
+  std::vector<unsigned char> GetBlindingKey(
+      const std::vector<unsigned char>& spk) {
     std::vector<unsigned char> private_blinding_key(EC_PRIVATE_KEY_LEN);
     CHECK_WALLY(wally_asset_blinding_key_to_ec_private_key(
-        master_blinding_key_.data(), master_blinding_key_.size(),
-        script_pubkey.data(), script_pubkey.size(), private_blinding_key.data(),
-        private_blinding_key.size()));
+        master_blinding_key_.data(), master_blinding_key_.size(), spk.data(),
+        spk.size(), private_blinding_key.data(), private_blinding_key.size()));
     return private_blinding_key;
   }
 
@@ -97,9 +100,6 @@ class WallySigner {
   LiquidUtxos GetUtxosFromTx(const std::string& txHex) {
     LiquidUtxos out;
     struct wally_tx* tx{nullptr};
-    auto ourScriptPubKey =
-        WallyUtils::GetScriptPubkeyFromAddress(GetAddress(8));
-
     const uint32_t txflags =
         WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
     CHECK_WALLY(wally_tx_from_hex(txHex.c_str(), txflags, &tx));
@@ -113,11 +113,10 @@ class WallySigner {
 
     for (size_t vout = 0; vout < num_outputs; vout++) {
       const auto& txout = tx->outputs[vout];
-      if (!txout.script || txout.script_len != ourScriptPubKey.size()) continue;
       std::vector<unsigned char> script(txout.script,
                                         txout.script + txout.script_len);
-      if (script != ourScriptPubKey) continue;
-      auto privateBlindingKey = GetPrivateBlindingKey(GetAddress(8));
+      if (!spk_.contains(script)) continue;
+      auto privateBlindingKey = GetBlindingKey(script);
 
       std::vector<unsigned char> nonce(txout.nonce,
                                        txout.nonce + txout.nonce_len);
@@ -139,10 +138,10 @@ class WallySigner {
           nonce.data(), nonce.size(), privateBlindingKey.data(),
           privateBlindingKey.size(), rangeproof.data(), rangeproof.size(),
           value_commitment_from_tx.data(), value_commitment_from_tx.size(),
-          ourScriptPubKey.data(), ourScriptPubKey.size(),
-          asset_commitment.data(), asset_commitment.size(), asset_out.data(),
-          asset_out.size(), abf_out.data(), abf_out.size(), vbf_out.data(),
-          vbf_out.size(), &value_out));
+          script.data(), script.size(), asset_commitment.data(),
+          asset_commitment.size(), asset_out.data(), asset_out.size(),
+          abf_out.data(), abf_out.size(), vbf_out.data(), vbf_out.size(),
+          &value_out));
 
       std::vector<unsigned char> asset_id(asset_out.begin(), asset_out.end());
       std::vector<unsigned char> asset_generator(ASSET_GENERATOR_LEN);
@@ -177,7 +176,7 @@ class WallySigner {
       out.values_in.push_back(value_out);
       out.abfs_in.insert(out.abfs_in.end(), abf_out.begin(), abf_out.end());
       out.vbfs_in.insert(out.vbfs_in.end(), vbf_out.begin(), vbf_out.end());
-      out.script_pubkeys_in.push_back(ourScriptPubKey);
+      out.script_pubkeys_in.push_back(script);
       out.value_commitments_in.push_back(value_commitment_from_tx);
       out.vouts_in.push_back(static_cast<uint32_t>(vout));
     }
@@ -624,27 +623,23 @@ class WallySigner {
     }
 
     // Sign P2WPKH (all inputs)
-    const auto& signingPubKey = GetSigningKey(8).second;
-    const auto& signingPrivKey = GetSigningKey(8).first;
-    std::vector<unsigned char> pubkeyhash(HASH160_LEN);
-    CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
-                              pubkeyhash.data(), pubkeyhash.size()));
-
-    std::vector<unsigned char> script_code(256);
-    size_t script_code_len = 0;
-    CHECK_WALLY(wally_scriptpubkey_p2pkh_from_bytes(
-        pubkeyhash.data(), pubkeyhash.size(), 0, script_code.data(),
-        script_code.size(), &script_code_len));
-    script_code.resize(script_code_len);
-
     for (size_t vin = 0; vin < num_inputs_combined; vin++) {
       const auto& utxo_script = combined_script_pubkeys_in[vin];
-      const unsigned char* expected_ptr = utxo_script.data() + 2;
-      if (utxo_script.size() < 2 + HASH160_LEN)
-        throw std::runtime_error("unexpected utxo script length");
-      if (std::memcmp(expected_ptr, pubkeyhash.data(), HASH160_LEN) != 0) {
-        throw std::runtime_error("Signing key mismatch for vin");
+      if (!spk_.contains(utxo_script)) {
+        throw std::runtime_error("Signing key not found");
       }
+      uint32_t index = spk_[utxo_script].index;
+      const auto& [signingPrivKey, signingPubKey] = GetSigningKey(index);
+      std::vector<unsigned char> pubkeyhash(HASH160_LEN);
+      CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
+                                pubkeyhash.data(), pubkeyhash.size()));
+
+      std::vector<unsigned char> script_code(256);
+      size_t script_code_len = 0;
+      CHECK_WALLY(wally_scriptpubkey_p2pkh_from_bytes(
+          pubkeyhash.data(), pubkeyhash.size(), 0, script_code.data(),
+          script_code.size(), &script_code_len));
+      script_code.resize(script_code_len);
 
       std::vector<unsigned char> sighash(SHA256_LEN);
       const auto& prevout_value =
