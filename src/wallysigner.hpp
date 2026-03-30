@@ -1,12 +1,4 @@
-#include <wally.hpp>
-#include <wally_address.h>
-#include <wally_bip32.h>
-#include <wally_bip39.h>
-#include <wally_crypto.h>
-#include <wally_elements.h>
-#include <wally_script.h>
-#include <wally_transaction.h>
-#include <wally_transaction_members.h>
+#include <liquid/wallyutils.hpp>
 
 #include <util/strencodings.h>
 #include <cstdint>
@@ -17,41 +9,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-template <typename T>
-T&& check_wally_ret(T&& ret, const char* file, int line, const char* func) {
-  if (ret != WALLY_OK) {
-    throw std::runtime_error(std::string("Error in ") + func + " at line " +
-                             std::to_string(line) + ": " + std::to_string(ret));
-  }
-  return std::forward<T>(ret);
-}
-#define CHECK_WALLY(ret) check_wally_ret(ret, __FILE__, __LINE__, __func__)
+#include <map>
 
 namespace nunchuk::wally {
-
-std::mt19937 gen(1);
-
-std::vector<unsigned char> rand_bytes(size_t n) {
-  std::vector<unsigned char> out(n);
-  // std::random_device rd;
-  for (size_t i = 0; i < n; i++) out[i] = static_cast<unsigned char>(gen());
-  return out;
-}
-
-std::vector<unsigned char> rand_ec_private_key() {
-  for (;;) {
-    auto k = rand_bytes(EC_PRIVATE_KEY_LEN);
-    if (wally_ec_private_key_verify(k.data(), k.size()) == WALLY_OK) return k;
-  }
-}
-
-const char* ADDRESS_FAMILY = "tex";
-const char* CONFIDENTIAL_ADDRESS_FAMILY = "tlq";
-const std::vector<unsigned char> USDT_ASSET_ID = ParseHex(
-    "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38");
-const std::vector<unsigned char> LBTC_ASSET_ID = ParseHex(
-    "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14");
 
 struct LiquidUtxos {
   std::vector<unsigned char> prevTxid;             // 32 bytes (internal order)
@@ -66,10 +26,18 @@ struct LiquidUtxos {
   std::vector<uint32_t> vouts_in;
 };
 
+struct AddressDetail {
+  std::string address;
+  std::string confidential_address;
+  std::vector<unsigned char> private_blinding_key;
+  std::vector<unsigned char> public_blinding_key;
+};
+
 class WallySigner {
  private:
   struct ext_key* master_{nullptr};
   std::vector<unsigned char> master_blinding_key_;
+  std::map<std::vector<unsigned char>, AddressDetail> spk_;
 
  public:
   WallySigner(const std::string& mnemonic, const std::string& passphrase) {
@@ -86,31 +54,22 @@ class WallySigner {
 
   ~WallySigner() { bip32_key_free(master_); }
 
-  std::string GetAddress() {
+  std::string GetAddress(uint32_t index) {
     struct ext_key* derived = nullptr;
-    CHECK_WALLY(bip32_key_from_parent_alloc(master_, 8, BIP32_FLAG_KEY_PRIVATE,
-                                            &derived));
+    CHECK_WALLY(bip32_key_from_parent_alloc(master_, index,
+                                            BIP32_FLAG_KEY_PRIVATE, &derived));
     char* address = nullptr;
     CHECK_WALLY(
         wally_bip32_key_to_addr_segwit(derived, ADDRESS_FAMILY, 0, &address));
-    return std::string(address);
-    // free address
-    // free derived
+    std::string rs = std::string(address);
+    wally_free_string(address);
+    bip32_key_free(derived);
+    return rs;
   }
 
-  std::vector<unsigned char> GetScriptPubkey() {
-    std::string address = GetAddress();
-    std::vector<unsigned char> script_pubkey(128);
-    size_t spk_len = 0;
-    CHECK_WALLY(wally_addr_segwit_to_bytes(address.c_str(), ADDRESS_FAMILY, 0,
-                                           script_pubkey.data(),
-                                           script_pubkey.size(), &spk_len));
-    script_pubkey.resize(spk_len);
-    return script_pubkey;
-  }
-
-  std::vector<unsigned char> GetPrivateBlindingKey() {
-    std::vector<unsigned char> script_pubkey = GetScriptPubkey();
+  std::vector<unsigned char> GetPrivateBlindingKey(const std::string& address) {
+    std::vector<unsigned char> script_pubkey =
+        WallyUtils::GetScriptPubkeyFromAddress(address);
     std::vector<unsigned char> private_blinding_key(EC_PRIVATE_KEY_LEN);
     CHECK_WALLY(wally_asset_blinding_key_to_ec_private_key(
         master_blinding_key_.data(), master_blinding_key_.size(),
@@ -119,26 +78,11 @@ class WallySigner {
     return private_blinding_key;
   }
 
-  std::string GetConfidentialAddress() {
-    std::string address = GetAddress();
-    std::vector<unsigned char> private_blinding_key = GetPrivateBlindingKey();
-    std::vector<unsigned char> public_blinding_key(EC_PUBLIC_KEY_LEN);
-    CHECK_WALLY(wally_ec_public_key_from_private_key(
-        private_blinding_key.data(), private_blinding_key.size(),
-        public_blinding_key.data(), public_blinding_key.size()));
-    char* conf_address = nullptr;
-    CHECK_WALLY(wally_confidential_addr_from_addr_segwit(
-        address.c_str(), ADDRESS_FAMILY, CONFIDENTIAL_ADDRESS_FAMILY,
-        public_blinding_key.data(), public_blinding_key.size(), &conf_address));
-    return std::string(conf_address);
-    // free conf_address
-  }
-
   std::pair<std::vector<unsigned char>, std::vector<unsigned char>>
-  GetSigningKey() {
+  GetSigningKey(uint32_t index) {
     struct ext_key* derived = nullptr;
-    CHECK_WALLY(bip32_key_from_parent_alloc(master_, 8, BIP32_FLAG_KEY_PRIVATE,
-                                            &derived));
+    CHECK_WALLY(bip32_key_from_parent_alloc(master_, index,
+                                            BIP32_FLAG_KEY_PRIVATE, &derived));
 
     std::vector<unsigned char> signing_priv_key(EC_PRIVATE_KEY_LEN);
     std::memcpy(signing_priv_key.data(), derived->priv_key + 1,
@@ -153,7 +97,8 @@ class WallySigner {
   LiquidUtxos GetUtxosFromTx(const std::string& txHex) {
     LiquidUtxos out;
     struct wally_tx* tx{nullptr};
-    auto ourScriptPubKey = GetScriptPubkey();
+    auto ourScriptPubKey =
+        WallyUtils::GetScriptPubkeyFromAddress(GetAddress(8));
 
     const uint32_t txflags =
         WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
@@ -172,7 +117,7 @@ class WallySigner {
       std::vector<unsigned char> script(txout.script,
                                         txout.script + txout.script_len);
       if (script != ourScriptPubKey) continue;
-      auto privateBlindingKey = GetPrivateBlindingKey();
+      auto privateBlindingKey = GetPrivateBlindingKey(GetAddress(8));
 
       std::vector<unsigned char> nonce(txout.nonce,
                                        txout.nonce + txout.nonce_len);
@@ -239,56 +184,6 @@ class WallySigner {
 
     wally_tx_free(tx);
     return out;
-  }
-
-  static std::string HexFromBytes(const unsigned char* data, size_t len) {
-    static const char* hexdigits = "0123456789abcdef";
-    std::string out;
-    out.resize(len * 2);
-    for (size_t i = 0; i < len; i++) {
-      out[2 * i] = hexdigits[(data[i] >> 4) & 0xF];
-      out[2 * i + 1] = hexdigits[data[i] & 0xF];
-    }
-    return out;
-  }
-
-  static std::string GetTxid(const std::string& txHex) {
-    struct wally_tx* t = nullptr;
-    CHECK_WALLY(wally_tx_from_hex(
-        txHex.c_str(), WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS,
-        &t));
-    std::vector<unsigned char> id(32);
-    CHECK_WALLY(wally_tx_get_txid(t, id.data(), id.size()));
-    std::reverse(id.begin(), id.end());
-    std::string txid = HexFromBytes(id.data(), id.size());
-    wally_tx_free(t);
-    return txid;
-  }
-
-  static std::vector<unsigned char> GetBlindingPubKey(
-      const std::string& confAddr) {
-    std::vector<unsigned char> blinding_pubkey(EC_PUBLIC_KEY_LEN);
-    CHECK_WALLY(wally_confidential_addr_segwit_to_ec_public_key(
-        confAddr.c_str(), CONFIDENTIAL_ADDRESS_FAMILY, blinding_pubkey.data(),
-        blinding_pubkey.size()));
-    return blinding_pubkey;
-  }
-
-  static std::vector<unsigned char> GetScriptPubkey(
-      const std::string& confAddr) {
-    char* non_conf_addr = nullptr;
-    CHECK_WALLY(wally_confidential_addr_to_addr_segwit(
-        confAddr.c_str(), CONFIDENTIAL_ADDRESS_FAMILY, ADDRESS_FAMILY,
-        &non_conf_addr));
-
-    size_t spk_len = 0;
-    std::vector<unsigned char> script_pubkey(128);
-    CHECK_WALLY(wally_addr_segwit_to_bytes(non_conf_addr, ADDRESS_FAMILY, 0,
-                                           script_pubkey.data(),
-                                           script_pubkey.size(), &spk_len));
-    script_pubkey.resize(spk_len);
-    CHECK_WALLY(wally_free_string(non_conf_addr));
-    return script_pubkey;
   }
 
   std::string CreateTx(
@@ -425,8 +320,10 @@ class WallySigner {
     std::vector<std::vector<unsigned char>> vbfs_recipient_all(
         n, std::vector<unsigned char>(32));
 
-    for (size_t i = 0; i < n; i++) abfs_recipient[i] = rand_bytes(32);
-    for (size_t i = 0; i + 1 < n; i++) vbfs_recipient_all[i] = rand_bytes(32);
+    for (size_t i = 0; i < n; i++)
+      abfs_recipient[i] = WallyUtils::RandomBytes(32);
+    for (size_t i = 0; i + 1 < n; i++)
+      vbfs_recipient_all[i] = WallyUtils::RandomBytes(32);
 
     // Build transfer arrays for asset_final_vbf
     std::vector<uint64_t> transfer_values_in;
@@ -493,7 +390,7 @@ class WallySigner {
         fee_vbfs_in.insert(fee_vbfs_in.end(), vbfs_in.begin() + idx * 32,
                            vbfs_in.begin() + (idx + 1) * 32);
       }
-      feeChange_abf = rand_bytes(32);
+      feeChange_abf = WallyUtils::RandomBytes(32);
 
       // feeChange_vbf equation: values = feeValuesIn + [feeSats, feeRemaining]
       std::vector<uint64_t> fee_values_for_vbf = fee_values_in;
@@ -587,8 +484,12 @@ class WallySigner {
       const uint64_t value = output_values[i];
       const auto& abf = abfs_recipient[i];
       const auto& vbf = vbfs_recipient_all[i];
-      const auto& blinding_pubkey = GetBlindingPubKey(destinationConfAddrs[i]);
-      const auto& script_pubkey = GetScriptPubkey(destinationConfAddrs[i]);
+      const auto& blinding_pubkey =
+          WallyUtils::GetBlindingPubKeyFromConfidentialAddress(
+              destinationConfAddrs[i]);
+      const auto& script_pubkey =
+          WallyUtils::GetScriptPubkeyFromConfidentialAddress(
+              destinationConfAddrs[i]);
 
       std::vector<unsigned char> generator(ASSET_GENERATOR_LEN);
       CHECK_WALLY(wally_asset_generator_from_bytes(
@@ -600,7 +501,7 @@ class WallySigner {
           value, vbf.data(), vbf.size(), generator.data(), generator.size(),
           value_commitment_out.data(), value_commitment_out.size()));
 
-      auto eph_priv = rand_ec_private_key();
+      auto eph_priv = WallyUtils::RandomEcPrivateKey();
       std::vector<unsigned char> eph_pub(EC_PUBLIC_KEY_LEN);
       CHECK_WALLY(wally_ec_public_key_from_private_key(
           eph_priv.data(), eph_priv.size(), eph_pub.data(), eph_pub.size()));
@@ -619,7 +520,7 @@ class WallySigner {
 
       std::vector<unsigned char> surj(ASSET_SURJECTIONPROOF_MAX_LEN);
       size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
-      auto surj_entropy = rand_bytes(32);
+      auto surj_entropy = WallyUtils::RandomBytes(32);
       CHECK_WALLY(wally_asset_surjectionproof(
           assetIdToSend.data(), assetIdToSend.size(), abf.data(), abf.size(),
           generator.data(), generator.size(), surj_entropy.data(),
@@ -651,7 +552,7 @@ class WallySigner {
           generator.data(), generator.size(), value_commitment_out.data(),
           value_commitment_out.size()));
 
-      auto eph_priv = rand_ec_private_key();
+      auto eph_priv = WallyUtils::RandomEcPrivateKey();
       std::vector<unsigned char> eph_pub(EC_PUBLIC_KEY_LEN);
       CHECK_WALLY(wally_ec_public_key_from_private_key(
           eph_priv.data(), eph_priv.size(), eph_pub.data(), eph_pub.size()));
@@ -659,8 +560,11 @@ class WallySigner {
       std::vector<unsigned char> rangeproof(ASSET_RANGEPROOF_MAX_LEN);
       size_t rangeproof_len = 0;
 
-      const auto& blinding_pubkey = GetBlindingPubKey(feeChangeConfAddr);
-      const auto& script_pubkey = GetScriptPubkey(feeChangeConfAddr);
+      const auto& blinding_pubkey =
+          WallyUtils::GetBlindingPubKeyFromConfidentialAddress(
+              feeChangeConfAddr);
+      const auto& script_pubkey =
+          WallyUtils::GetScriptPubkeyFromConfidentialAddress(feeChangeConfAddr);
 
       CHECK_WALLY(wally_asset_rangeproof(
           feeRemaining, blinding_pubkey.data(), blinding_pubkey.size(),
@@ -675,7 +579,7 @@ class WallySigner {
 
       std::vector<unsigned char> surj(ASSET_SURJECTIONPROOF_MAX_LEN);
       size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
-      auto surj_entropy = rand_bytes(32);
+      auto surj_entropy = WallyUtils::RandomBytes(32);
       CHECK_WALLY(wally_asset_surjectionproof(
           LBTC_ASSET_ID.data(), LBTC_ASSET_ID.size(), feeChange_abf.data(),
           feeChange_abf.size(), generator.data(), generator.size(),
@@ -716,8 +620,8 @@ class WallySigner {
     }
 
     // Sign P2WPKH (all inputs)
-    const auto& signingPubKey = GetSigningKey().second;
-    const auto& signingPrivKey = GetSigningKey().first;
+    const auto& signingPubKey = GetSigningKey(8).second;
+    const auto& signingPrivKey = GetSigningKey(8).first;
     std::vector<unsigned char> pubkeyhash(HASH160_LEN);
     CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
                               pubkeyhash.data(), pubkeyhash.size()));
