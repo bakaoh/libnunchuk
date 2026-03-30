@@ -59,8 +59,8 @@ class WallySigner {
     CHECK_WALLY(bip32_key_from_parent_alloc(master_, index,
                                             BIP32_FLAG_KEY_PRIVATE, &derived));
     char* address = nullptr;
-    CHECK_WALLY(
-        wally_bip32_key_to_addr_segwit(derived, ADDRESS_FAMILY, 0, &address));
+    CHECK_WALLY(wally_bip32_key_to_addr_segwit(
+        derived, WallyUtils::C().ADDRESS_FAMILY, 0, &address));
     std::string rs = std::string(address);
     wally_free_string(address);
     bip32_key_free(derived);
@@ -237,7 +237,7 @@ class WallySigner {
           "No spendable outputs found in prev tx(s) for our script_pubkey");
 
     // Determine which input indices are transfer-fee based on asset ids
-    const bool feeAssetSame = assetIdToSend == LBTC_ASSET_ID;
+    const bool feeAssetSame = assetIdToSend == WallyUtils::C().LBTC_ASSET_ID;
     std::vector<size_t> transferIdx;
     std::vector<size_t> feeIdx;
     transferIdx.reserve(num_inputs);
@@ -247,7 +247,8 @@ class WallySigner {
       const unsigned char* id = asset_ids_in.data() + vin * 32;
       if (std::memcmp(id, assetIdToSend.data(), 32) == 0)
         transferIdx.push_back(vin);
-      if (std::memcmp(id, LBTC_ASSET_ID.data(), 32) == 0) feeIdx.push_back(vin);
+      if (std::memcmp(id, WallyUtils::C().LBTC_ASSET_ID.data(), 32) == 0)
+        feeIdx.push_back(vin);
     }
 
     if (transferIdx.empty()) {
@@ -468,7 +469,7 @@ class WallySigner {
     // Fee output explicit (vout0)
     std::vector<unsigned char> fee_asset(1 + 32);
     fee_asset[0] = 0x01;
-    std::memcpy(fee_asset.data() + 1, LBTC_ASSET_ID.data(), 32);
+    std::memcpy(fee_asset.data() + 1, WallyUtils::C().LBTC_ASSET_ID.data(), 32);
 
     std::vector<unsigned char> fee_value(WALLY_TX_ASSET_CT_VALUE_UNBLIND_LEN);
     CHECK_WALLY(wally_tx_confidential_value_from_satoshi(
@@ -543,7 +544,8 @@ class WallySigner {
     if (createFeeChange) {
       std::vector<unsigned char> generator(ASSET_GENERATOR_LEN);
       CHECK_WALLY(wally_asset_generator_from_bytes(
-          LBTC_ASSET_ID.data(), LBTC_ASSET_ID.size(), feeChange_abf.data(),
+          WallyUtils::C().LBTC_ASSET_ID.data(),
+          WallyUtils::C().LBTC_ASSET_ID.size(), feeChange_abf.data(),
           feeChange_abf.size(), generator.data(), generator.size()));
 
       std::vector<unsigned char> value_commitment_out(ASSET_COMMITMENT_LEN);
@@ -568,9 +570,10 @@ class WallySigner {
 
       CHECK_WALLY(wally_asset_rangeproof(
           feeRemaining, blinding_pubkey.data(), blinding_pubkey.size(),
-          eph_priv.data(), eph_priv.size(), LBTC_ASSET_ID.data(),
-          LBTC_ASSET_ID.size(), feeChange_abf.data(), feeChange_abf.size(),
-          feeChange_vbf.data(), feeChange_vbf.size(),
+          eph_priv.data(), eph_priv.size(),
+          WallyUtils::C().LBTC_ASSET_ID.data(),
+          WallyUtils::C().LBTC_ASSET_ID.size(), feeChange_abf.data(),
+          feeChange_abf.size(), feeChange_vbf.data(), feeChange_vbf.size(),
           value_commitment_out.data(), value_commitment_out.size(),
           script_pubkey.data(), script_pubkey.size(), generator.data(),
           generator.size(), 1, 0, 36, rangeproof.data(), rangeproof.size(),
@@ -581,7 +584,8 @@ class WallySigner {
       size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
       auto surj_entropy = WallyUtils::RandomBytes(32);
       CHECK_WALLY(wally_asset_surjectionproof(
-          LBTC_ASSET_ID.data(), LBTC_ASSET_ID.size(), feeChange_abf.data(),
+          WallyUtils::C().LBTC_ASSET_ID.data(),
+          WallyUtils::C().LBTC_ASSET_ID.size(), feeChange_abf.data(),
           feeChange_abf.size(), generator.data(), generator.size(),
           surj_entropy.data(), surj_entropy.size(),
           combined_asset_ids_in_for_surj.data(),
