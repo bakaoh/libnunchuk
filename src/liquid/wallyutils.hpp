@@ -51,15 +51,30 @@ T&& check_wally_ret(T&& ret, const char* file, int line, const char* func) {
 
 namespace nunchuk::wally {
 
-const char* ADDRESS_FAMILY = "tex";
-const char* CONFIDENTIAL_ADDRESS_FAMILY = "tlq";
-const std::vector<unsigned char> USDT_ASSET_ID = ParseHex(
-    "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38");
-const std::vector<unsigned char> LBTC_ASSET_ID = ParseHex(
-    "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14");
+struct WallyConstants {
+  char* ADDRESS_FAMILY;
+  char* CONFIDENTIAL_ADDRESS_FAMILY;
+  std::vector<unsigned char> USDT_ASSET_ID;
+  std::vector<unsigned char> LBTC_ASSET_ID;
+};
 
 class WallyUtils {
  public:
+  static void Init() { CHECK_WALLY(wally_init(0)); }
+
+  static void Cleanup() { CHECK_WALLY(wally_cleanup(0)); }
+
+  static WallyConstants& C() {
+    static WallyConstants constants;
+    constants.ADDRESS_FAMILY = "tex";
+    constants.CONFIDENTIAL_ADDRESS_FAMILY = "tlq";
+    constants.USDT_ASSET_ID = ParseHex(
+        "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38");
+    constants.LBTC_ASSET_ID = ParseHex(
+        "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14");
+    return constants;
+  }
+
   static std::vector<unsigned char> RandomBytes(size_t n) {
     static std::mt19937 gen(1);
     std::vector<unsigned char> out(n);
@@ -102,37 +117,36 @@ class WallyUtils {
       const std::string& confAddr) {
     std::vector<unsigned char> blinding_pubkey(EC_PUBLIC_KEY_LEN);
     CHECK_WALLY(wally_confidential_addr_segwit_to_ec_public_key(
-        confAddr.c_str(), CONFIDENTIAL_ADDRESS_FAMILY, blinding_pubkey.data(),
-        blinding_pubkey.size()));
+        confAddr.c_str(), C().CONFIDENTIAL_ADDRESS_FAMILY,
+        blinding_pubkey.data(), blinding_pubkey.size()));
     return blinding_pubkey;
   }
 
   static std::vector<unsigned char> GetScriptPubkeyFromConfidentialAddress(
       const std::string& confAddr) {
-    char* non_conf_addr = nullptr;
+    char* addr = nullptr;
     CHECK_WALLY(wally_confidential_addr_to_addr_segwit(
-        confAddr.c_str(), CONFIDENTIAL_ADDRESS_FAMILY, ADDRESS_FAMILY,
-        &non_conf_addr));
+        confAddr.c_str(), C().CONFIDENTIAL_ADDRESS_FAMILY, C().ADDRESS_FAMILY,
+        &addr));
 
+    std::vector<unsigned char> spk(128);
     size_t spk_len = 0;
-    std::vector<unsigned char> script_pubkey(128);
-    CHECK_WALLY(wally_addr_segwit_to_bytes(non_conf_addr, ADDRESS_FAMILY, 0,
-                                           script_pubkey.data(),
-                                           script_pubkey.size(), &spk_len));
-    script_pubkey.resize(spk_len);
-    CHECK_WALLY(wally_free_string(non_conf_addr));
-    return script_pubkey;
+    CHECK_WALLY(wally_addr_segwit_to_bytes(addr, C().ADDRESS_FAMILY, 0,
+                                           spk.data(), spk.size(), &spk_len));
+    spk.resize(spk_len);
+    CHECK_WALLY(wally_free_string(addr));
+    return spk;
   }
 
   static std::vector<unsigned char> GetScriptPubkeyFromAddress(
       const std::string& address) {
-    std::vector<unsigned char> script_pubkey(128);
+    std::vector<unsigned char> spk(128);
     size_t spk_len = 0;
-    CHECK_WALLY(wally_addr_segwit_to_bytes(address.c_str(), ADDRESS_FAMILY, 0,
-                                           script_pubkey.data(),
-                                           script_pubkey.size(), &spk_len));
-    script_pubkey.resize(spk_len);
-    return script_pubkey;
+    CHECK_WALLY(wally_addr_segwit_to_bytes(address.c_str(), C().ADDRESS_FAMILY,
+                                           0, spk.data(), spk.size(),
+                                           &spk_len));
+    spk.resize(spk_len);
+    return spk;
   }
 };
 }  // namespace nunchuk::wally
