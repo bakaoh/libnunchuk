@@ -36,6 +36,7 @@ class WallySigner {
   struct ext_key* master_{nullptr};
   std::vector<unsigned char> master_blinding_key_;
   std::map<std::vector<unsigned char>, AddressDetail> spk_;
+  uint32_t tx_flags_ = WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
 
  public:
   WallySigner(const std::string& mnemonic, const std::string& passphrase) {
@@ -100,9 +101,7 @@ class WallySigner {
   LiquidUtxos GetUtxosFromTx(const std::string& txHex) {
     LiquidUtxos out;
     struct wally_tx* tx{nullptr};
-    const uint32_t txflags =
-        WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
-    CHECK_WALLY(wally_tx_from_hex(txHex.c_str(), txflags, &tx));
+    CHECK_WALLY(wally_tx_from_hex(txHex.c_str(), tx_flags_, &tx));
 
     out.tx_id.resize(32);
     CHECK_WALLY(wally_tx_get_txid(tx, out.tx_id.data(), out.tx_id.size()));
@@ -678,9 +677,7 @@ class WallySigner {
 
     // Serialize
     char* txhex = nullptr;
-    CHECK_WALLY(wally_tx_to_hex(
-        output_tx, WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS,
-        &txhex));
+    CHECK_WALLY(wally_tx_to_hex(output_tx, tx_flags_, &txhex));
     std::string txHexOut(txhex);
     wally_free_string(txhex);
     wally_tx_free(output_tx);

@@ -17,8 +17,8 @@
 
 #ifndef NUNCHUK_WALLYUTILS_HPP
 #define NUNCHUK_WALLYUTILS_HPP
+#define WALLY_DISABLE_OP_CODE
 
-#include <wally.hpp>
 #include <wally_address.h>
 #include <wally_bip32.h>
 #include <wally_bip39.h>
