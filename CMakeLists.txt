@@ -100,14 +100,14 @@ endif()
 
 add_subdirectory(embedded)
 
-add_library(secp256k1-zkp STATIC IMPORTED)
-set_target_properties(secp256k1-zkp PROPERTIES IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/contrib/libwally-core/src/secp256k1/.libs/libsecp256k1.a")
+# add_library(secp256k1-zkp STATIC IMPORTED)
+# set_target_properties(secp256k1-zkp PROPERTIES IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/contrib/libwally-core/src/secp256k1/.libs/libsecp256k1.a")
 add_library(libwally STATIC IMPORTED)
 set_target_properties(libwally PROPERTIES IMPORTED_LOCATION "${PROJECT_SOURCE_DIR}/contrib/libwally-core/src/.libs/libwallycore.a")
 target_include_directories(libwally INTERFACE
     "${PROJECT_SOURCE_DIR}/contrib/libwally-core/include"
 )
-target_link_libraries(libwally INTERFACE secp256k1-zkp)
+target_link_libraries(libwally INTERFACE secp256k1)
 
 set(UR__DISABLE_TESTS ON)
 add_subdirectory(contrib/bc-ur-cpp)

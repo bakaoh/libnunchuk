@@ -24,6 +24,7 @@
 #include <script/solver.h>
 #include <key_io.h>
 #include <core_io.h>
+#include <liquid/wallyutils.hpp>
 
 #include <string>
 #include <vector>
@@ -63,9 +64,14 @@ inline std::string ScriptPubKeyToAddress(const std::string& script_pub_key) {
 
 inline std::string AddressToScriptHash(const std::string& address) {
   CSHA256 hasher;
-  auto stream = ParseHex(AddressToScriptPubKey(address));
-  hasher.Write((unsigned char*)&(*stream.begin()),
-               stream.end() - stream.begin());
+  std::vector<unsigned char> spk;
+  if (address.find(
+          std::string(nunchuk::wally::WallyUtils::C().ADDRESS_FAMILY)) == 0) {
+    spk = nunchuk::wally::WallyUtils::GetScriptPubkeyFromAddress(address);
+  } else {
+    spk = ParseHex(AddressToScriptPubKey(address));
+  }
+  hasher.Write((unsigned char*)&(*spk.begin()), spk.end() - spk.begin());
   uint256 scripthash;
   hasher.Finalize(scripthash.begin());
   return scripthash.GetHex();
