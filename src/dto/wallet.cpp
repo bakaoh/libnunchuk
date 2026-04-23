@@ -106,7 +106,9 @@ bool Wallet::need_backup() const { return need_backup_; }
 bool Wallet::is_archived() const { return archived_; }
 std::string Wallet::get_miniscript(DescriptorPath path, int index) const {
   auto defaultPath = DefaultDescriptorPath(signers_);
-  if (path == DescriptorPath::ANY && defaultPath == DescriptorPath::EXTERNAL_INTERNAL) path = defaultPath;
+  if (path == DescriptorPath::ANY &&
+      defaultPath == DescriptorPath::EXTERNAL_INTERNAL)
+    path = defaultPath;
   if (path == defaultPath) return miniscript_;
   if (defaultPath == DescriptorPath::EXTERNAL_INTERNAL) {
     std::string rs = miniscript_;
@@ -248,6 +250,15 @@ void Wallet::post_update() {
     id_ = GetWalletId(signers_, m_, address_type_, get_wallet_type(),
                       get_wallet_template());
   }
+}
+
+bool Wallet::support_liquid() const { return support_liquid_; }
+Amount Wallet::get_asset_balance(const AssetId& asset_id) const {
+  return asset_balances_.at(asset_id);
+}
+void Wallet::set_support_liquid(bool value) { support_liquid_ = value; }
+void Wallet::set_asset_balance(const AssetId& asset_id, const Amount& value) {
+  asset_balances_[asset_id] = value;
 }
 
 }  // namespace nunchuk

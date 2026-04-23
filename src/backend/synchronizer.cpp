@@ -77,15 +77,9 @@ bool Synchronizer::NeedRecreate(const AppSettings& new_settings) {
             new_settings.get_corerpc_password())
       return true;
   } else {
-    if ((new_settings.get_chain() == Chain::TESTNET &&
-         app_settings_.get_testnet_servers() !=
-             new_settings.get_testnet_servers()) ||
-        (new_settings.get_chain() == Chain::MAIN &&
-         app_settings_.get_mainnet_servers() !=
-             new_settings.get_mainnet_servers()) ||
-        (new_settings.get_chain() == Chain::SIGNET &&
-         app_settings_.get_signet_servers() !=
-             new_settings.get_signet_servers()))
+    if (app_settings_.get_electrum_servers() !=
+            new_settings.get_electrum_servers() ||
+        app_settings_.get_liquid_servers() != new_settings.get_liquid_servers())
       return true;
   }
   return false;

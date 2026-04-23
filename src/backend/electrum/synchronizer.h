@@ -80,8 +80,10 @@ class ElectrumSynchronizer : public Synchronizer {
       const std::string& wallet_id, const std::vector<std::string>& addresses);
   void BlockchainSync(Chain chain);
   void WaitForReady();
+  ElectrumClient* GetClient(Chain chain, const std::string& wallet_id);
 
   std::unique_ptr<ElectrumClient> client_;
+  std::unique_ptr<ElectrumClient> liquid_client_;
 
   Status status_ = Status::UNINITIALIZED;
   std::mutex status_mutex_;
