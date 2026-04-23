@@ -142,9 +142,11 @@ class NunchukWalletDb : public NunchukDb {
   Transaction GetDummyTx(const std::string &id);
 
   std::string GetMiniscript();
-  bool IsSupportLiquid();
+  bool IsSupportLiquid() const;
 
  private:
+  const char* TxTable() const;
+  const char* AddressTable() const;
   void CreateCoinControlTable();
   void CreateDummyTxTable();
   void ClearCoinControlData();
