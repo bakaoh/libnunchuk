@@ -91,6 +91,7 @@ void NunchukWalletDb::InitWallet(const Wallet& wallet) {
   PutString(DbKeys::NAME, wallet.get_name());
   PutString(DbKeys::DESCRIPTION, wallet.get_description());
   PutString(DbKeys::MINISCRIPT, wallet.get_miniscript());
+  PutInt(DbKeys::SUPPORT_LIQUID, wallet.support_liquid() ? 1 : 0);
 
   json immutable_data = {{"m", wallet.get_m()},
                          {"n", wallet.get_n()},
@@ -199,6 +200,7 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   AddressType address_type = immutable_data["address_type"];
   time_t create_date = immutable_data["create_date"];
   int gap_limit = GetInt(DbKeys::GAP_LIMIT);
+  bool support_liquid = IsSupportLiquid();
 
   WalletType wallet_type = WalletType::MULTI_SIG;
   if (immutable_data["wallet_type"] != nullptr) {
@@ -229,6 +231,7 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   wallet.set_need_backup(GetInt(DbKeys::NEED_BACKUP) == 1);
   wallet.set_archived(GetInt(DbKeys::ARCHIVED) == 1);
   wallet.set_wallet_template(wallet_template);
+  wallet.set_support_liquid(support_liquid);
   if (!skip_provider) {
     GetAllAddressData(false);  // update range to max address index
     auto desc = GetDescriptorsImportString(wallet);
@@ -255,6 +258,9 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   if (!skip_balance) {
     wallet.set_balance(GetBalance(false));
     wallet.set_unconfirmed_balance(GetBalance(true));
+    if (support_liquid) {
+      // TODO: liquid
+    }
   }
   if (!txs_cache_.count(db_file_name_)) txs_cache_[db_file_name_] = {};
   return wallet;
@@ -2494,6 +2500,10 @@ std::string NunchukWalletDb::GetMiniscript() {
   }
   out.append(miniscript, last, std::string::npos);
   return out;
+}
+
+bool NunchukWalletDb::IsSupportLiquid() {
+  return GetInt(DbKeys::SUPPORT_LIQUID) == 1;
 }
 
 }  // namespace nunchuk

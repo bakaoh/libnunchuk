@@ -75,6 +75,7 @@ typedef std::pair<std::string, Amount> TxOutput;    // address-amount pair
 typedef std::map<std::string, bool> RequestTokens;  // token-sent map
 typedef std::vector<size_t> ScriptNodeId;
 typedef std::vector<ScriptNodeId> SigningPath;
+typedef std::vector<unsigned char> AssetId;  // 32 bytes
 
 enum class AddressType {
   ANY,
@@ -567,6 +568,8 @@ class NUNCHUK_EXPORT Wallet {
   bool is_archived() const;
   std::string get_miniscript(DescriptorPath key_path = DescriptorPath::ANY,
                              int index = -1) const;
+  bool support_liquid() const;
+  Amount get_asset_balance(const AssetId& asset_id) const;
 
   void set_name(const std::string& value);
   void set_n(int n);
@@ -584,6 +587,8 @@ class NUNCHUK_EXPORT Wallet {
   void set_need_backup(bool value);
   void set_archived(bool value);
   void set_miniscript(const std::string& value);
+  void set_support_liquid(bool value);
+  void set_asset_balance(const AssetId& asset_id, const Amount& value);
 
  private:
   void post_update();
@@ -605,6 +610,8 @@ class NUNCHUK_EXPORT Wallet {
   bool need_backup_{false};
   bool archived_{false};
   std::string miniscript_;
+  bool support_liquid_{false};
+  std::map<AssetId, Amount> asset_balances_{};
 };
 
 class NUNCHUK_EXPORT CoinTag {
@@ -1361,9 +1368,8 @@ class NUNCHUK_EXPORT AppSettings {
 
   Chain get_chain() const;
   BackendType get_backend_type() const;
-  std::vector<std::string> get_mainnet_servers() const;
-  std::vector<std::string> get_signet_servers() const;
-  std::vector<std::string> get_testnet_servers() const;
+  std::vector<std::string> get_electrum_servers() const;
+  std::vector<std::string> get_liquid_servers() const;
   std::string get_hwi_path() const;
   std::string get_storage_path() const;
   bool use_proxy() const;
@@ -1380,9 +1386,8 @@ class NUNCHUK_EXPORT AppSettings {
 
   void set_chain(Chain value);
   void set_backend_type(BackendType value);
-  void set_mainnet_servers(const std::vector<std::string>& value);
-  void set_signet_servers(const std::vector<std::string>& value);
-  void set_testnet_servers(const std::vector<std::string>& value);
+  void set_electrum_servers(const std::vector<std::string>& value);
+  void set_liquid_servers(const std::vector<std::string>& value);
   void set_hwi_path(const std::string& value);
   void set_storage_path(const std::string& value);
   void enable_proxy(bool value);
@@ -1400,9 +1405,8 @@ class NUNCHUK_EXPORT AppSettings {
  private:
   Chain chain_;
   BackendType backend_type_;
-  std::vector<std::string> mainnet_servers_;
-  std::vector<std::string> signet_servers_;
-  std::vector<std::string> testnet_servers_;
+  std::vector<std::string> electrum_servers_;
+  std::vector<std::string> liquid_servers_;
   std::string hwi_path_;
   std::string storage_path_;
   bool enable_proxy_;

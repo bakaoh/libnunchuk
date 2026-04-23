@@ -1019,6 +1019,11 @@ Wallet NunchukStorage::GetWallet(Chain chain, const std::string& id,
   return true_wallet;
 }
 
+bool NunchukStorage::IsSupportLiquid(Chain chain, const std::string& wallet_id) {
+  std::shared_lock<std::shared_mutex> lock(access_);
+  return GetWalletDb(chain, wallet_id).IsSupportLiquid();
+}
+
 bool NunchukStorage::HasWallet(Chain chain, const std::string& wallet_id) {
   bfs::path wallet_file = GetWalletDir(chain, wallet_id);
   return bfs::exists(wallet_file);

@@ -184,7 +184,7 @@ class WallySigner {
   }
 
   std::string CreateTx(
-      const std::vector<nunchuk::wally::LiquidUtxos>& inputs,
+      const std::vector<LiquidUtxos>& inputs,
       const std::vector<std::string>& destinationConfAddrs,
       const std::string& feeChangeConfAddr,  // empty => no fee change output
       const std::vector<unsigned char>& assetIdToSend, uint64_t feeSats) {
