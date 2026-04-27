@@ -244,6 +244,10 @@ std::string GetDescriptorForSigners(const std::vector<SingleSigner>& signers,
                                     WalletType wallet_type,
                                     WalletTemplate wallet_template, int index,
                                     bool sorted) {
+  if (wallet_type == WalletType::LIQUID) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported");
+  }
   std::vector<std::string> keys{};
   for (auto&& signer : signers) {
     auto eii = signer.get_external_internal_index();
@@ -510,7 +514,8 @@ std::optional<Wallet> ParseTrDescriptor(const std::string& desc,
       continue;
     }
     signers.push_back(ParseSignerString(key));
-    if (eii != std::make_pair(0,0)) signers.back().set_external_internal_index(eii);
+    if (eii != std::make_pair(0, 0))
+      signers.back().set_external_internal_index(eii);
     signers_map[key] = signers.back();
   }
 

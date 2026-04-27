@@ -2356,6 +2356,10 @@ std::string NunchukImpl::CreatePsbt(
     int& vsize, int& change_pos, bool anti_fee_sniping, bool use_script_path,
     const SigningPath& signing_path) {
   Wallet wallet = GetWallet(wallet_id);
+  if (wallet.get_wallet_type() == WalletType::LIQUID) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported");
+  }
   if (wallet.get_address_type() != AddressType::TAPROOT ||
       wallet.get_wallet_template() == WalletTemplate::DISABLE_KEY_PATH) {
     use_script_path = true;
