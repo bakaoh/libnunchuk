@@ -645,7 +645,11 @@ std::optional<Wallet> ParseDescriptors(const std::string& descs,
     }
     error = "Failed to verify wallet descriptor";
     return std::nullopt;
+  } catch (const std::exception& e) {
+    error = e.what();
+    return std::nullopt;
   } catch (...) {
+    error = "Unknown error";
     return std::nullopt;
   }
 }

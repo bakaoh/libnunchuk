@@ -67,6 +67,9 @@
 #include <miniscript/timeline.h>
 #include <miniscript/util.h>
 
+#include <liquid/wallyutils.hpp>
+#include <liquid/wallysigner.hpp>
+
 using namespace boost::algorithm;
 using namespace nunchuk::bcr2;
 
@@ -1628,6 +1631,14 @@ std::vector<std::string> Utils::ParseSignerNames(
   getKeynames(script_node);
   std::sort(names.begin() + keypath_m, names.end());
   return names;
+}
+
+AssetId Utils::GetUSDTAssetId() {
+  return wally::WallyUtils::C().USDT_ASSET_ID;
+}
+
+AssetId Utils::GetLBTCAssetId() {
+  return wally::WallyUtils::C().LBTC_ASSET_ID;
 }
 
 }  // namespace nunchuk

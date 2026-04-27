@@ -3256,6 +3256,27 @@ std::vector<SingleSigner> NunchukImpl::GetTransactionSigners(
   return GetRawTxSigners(tx.get_raw(), utxos, wallet);
 }
 
+// Liquid wallet
+Wallet NunchukImpl::CreateLiquidWallet(const std::string& mnemonic,
+                                       const std::string& passphrase,
+                                       bool need_backup, bool replace) {
+  // return Wallet::CreateLiquidWallet(mnemonic, passphrase, need_backup,
+  // replace);
+  return Wallet{};
+}
+
+Wallet NunchukImpl::CreateLiquidWallet(const std::string& softwaresigner_id,
+                                       bool need_backup, bool replace) {
+  // return Wallet::CreateLiquidWallet(softwaresigner_id, need_backup, replace);
+  return Wallet{};
+}
+
+std::map<AssetId, Amount> NunchukImpl::GetAddressAssets(
+    const std::string& wallet_id, const std::string& address) {
+  // return Wallet::GetAddressAssets(wallet_id, address);
+  return std::map<AssetId, Amount>{};
+}
+
 std::unique_ptr<Nunchuk> MakeNunchuk(const AppSettings& appsettings,
                                      const std::string& passphrase) {
   return std::unique_ptr<NunchukImpl>(
