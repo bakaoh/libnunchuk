@@ -2039,6 +2039,17 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual Transaction GetDummyTx(const std::string& wallet_id,
                                  const std::string& id) = 0;
 
+  // Liquid wallet
+  virtual Wallet CreateLiquidWallet(const std::string& mnemonic = {},
+                                    const std::string& passphrase = {},
+                                    bool need_backup = true,
+                                    bool replace = true) = 0;
+  virtual Wallet CreateLiquidWallet(const std::string& softwaresigner_id,
+                                    bool need_backup = true,
+                                    bool replace = true) = 0;
+  virtual std::map<AssetId, Amount> GetAddressAssets(
+      const std::string& wallet_id, const std::string& address) = 0;
+
   // Add listener methods
   virtual void AddBalanceListener(
       std::function<void(std::string /* wallet_id */, Amount /* new_balance */)>
@@ -2472,6 +2483,8 @@ class NUNCHUK_EXPORT Utils {
       int chain_tip);
   static std::vector<std::string> ParseSignerNames(
       const std::string& script_template, int& keypath_m);
+  static AssetId GetUSDTAssetId();
+  static AssetId GetLBTCAssetId();
 
  private:
   Utils() {}

@@ -746,6 +746,17 @@ class NunchukImpl : public Nunchuk {
   std::string DecryptGroupTxId(const std::string& walletId,
                                const std::string& txGid) override;
 
+  // Liquid wallet
+  Wallet CreateLiquidWallet(const std::string& mnemonic = {},
+                            const std::string& passphrase = {},
+                            bool need_backup = true,
+                            bool replace = true) override;
+  Wallet CreateLiquidWallet(const std::string& softwaresigner_id,
+                            bool need_backup = true,
+                            bool replace = true) override;
+  std::map<AssetId, Amount> GetAddressAssets(
+      const std::string& wallet_id, const std::string& address) override;
+
   void AddGroupUpdateListener(
       std::function<void(const GroupSandbox& state)> listener) override;
   void AddGroupMessageListener(

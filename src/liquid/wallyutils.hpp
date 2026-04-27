@@ -39,6 +39,8 @@
 #include <vector>
 #include <map>
 
+#include <nunchuk.h>
+
 template <typename T>
 T&& check_wally_ret(T&& ret, const char* file, int line, const char* func) {
   if (ret != WALLY_OK) {
@@ -52,8 +54,8 @@ T&& check_wally_ret(T&& ret, const char* file, int line, const char* func) {
 namespace nunchuk::wally {
 
 struct WallyConstants {
-  char* ADDRESS_FAMILY;
-  char* CONFIDENTIAL_ADDRESS_FAMILY;
+  const char* ADDRESS_FAMILY;
+  const char* CONFIDENTIAL_ADDRESS_FAMILY;
   std::vector<unsigned char> USDT_ASSET_ID;
   std::vector<unsigned char> LBTC_ASSET_ID;
 };
@@ -65,14 +67,33 @@ class WallyUtils {
   static void Cleanup() { CHECK_WALLY(wally_cleanup(0)); }
 
   static WallyConstants& C() {
-    static WallyConstants constants;
-    constants.ADDRESS_FAMILY = "tex";
-    constants.CONFIDENTIAL_ADDRESS_FAMILY = "tlq";
-    constants.USDT_ASSET_ID = ParseHex(
-        "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38");
-    constants.LBTC_ASSET_ID = ParseHex(
-        "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14");
-    return constants;
+    static WallyConstants mainnet{
+        .ADDRESS_FAMILY = "ex",
+        .CONFIDENTIAL_ADDRESS_FAMILY = "lq",
+        .USDT_ASSET_ID = ParseHex(
+            "ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2"),
+        .LBTC_ASSET_ID = ParseHex(
+            "6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d"),
+    };
+
+    static WallyConstants testnet{
+        .ADDRESS_FAMILY = "tex",
+        .CONFIDENTIAL_ADDRESS_FAMILY = "tlq",
+        .USDT_ASSET_ID = ParseHex(
+            "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38"),
+        .LBTC_ASSET_ID = ParseHex(
+            "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14"),
+    };
+
+    switch (nunchuk::Utils::GetChain()) {
+      case nunchuk::Chain::MAIN:
+        return mainnet;
+      case nunchuk::Chain::TESTNET:
+      case nunchuk::Chain::SIGNET:
+      case nunchuk::Chain::REGTEST:
+      default:
+        return testnet;
+    }
   }
 
   static std::vector<unsigned char> RandomBytes(size_t n) {
