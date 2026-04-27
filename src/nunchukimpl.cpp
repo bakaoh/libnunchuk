@@ -3260,9 +3260,27 @@ std::vector<SingleSigner> NunchukImpl::GetTransactionSigners(
 Wallet NunchukImpl::CreateLiquidWallet(const std::string& mnemonic,
                                        const std::string& passphrase,
                                        bool need_backup, bool replace) {
-  // return Wallet::CreateLiquidWallet(mnemonic, passphrase, need_backup,
-  // replace);
-  return Wallet{};
+  std::string seed = mnemonic.empty() ? Utils::GenerateMnemonic() : mnemonic;
+  auto id = storage_->GetLiquidWalletId();
+  auto key_name = id == 0 ? "USDT key" : "USDT key #" + std::to_string(id + 1);
+  auto ss = CreateSoftwareSigner(
+      key_name, seed, passphrase, [](int) { return true; }, false, replace);
+  WalletType wt = WalletType::SINGLE_SIG;
+  AddressType at = AddressType::NATIVE_SEGWIT;
+  auto signer = GetDefaultSignerFromMasterSigner(ss.get_id(), wt, at);
+  auto name =
+      id == 0 ? "USDT wallet" : "USDT wallet #" + std::to_string(id + 1);
+
+  Wallet w("", name, 1, 1, {signer}, at, wt, std::time(0));
+  w.set_support_liquid(true);
+  auto wallet = CreateWallet(w);
+
+  if (need_backup) {
+    wallet.set_need_backup(true);
+    storage_->UpdateWallet(chain_, wallet);
+  }
+  storage_->SetLiquidWalletId(id + 1);
+  return wallet;
 }
 
 Wallet NunchukImpl::CreateLiquidWallet(const std::string& softwaresigner_id,

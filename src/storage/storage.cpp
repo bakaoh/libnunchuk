@@ -2187,6 +2187,16 @@ bool NunchukStorage::SetHotWalletId(int value) {
   return GetAppStateDb(Chain::MAIN).SetHotWalletId(value);
 }
 
+int NunchukStorage::GetLiquidWalletId() {
+  std::shared_lock<std::shared_mutex> lock(access_);
+  return GetAppStateDb(Chain::MAIN).GetLiquidWalletId();
+}
+
+bool NunchukStorage::SetLiquidWalletId(int value) {
+  std::unique_lock<std::shared_mutex> lock(access_);
+  return GetAppStateDb(Chain::MAIN).SetLiquidWalletId(value);
+}
+
 void NunchukStorage::InitDataDir(const bfs::path& dir) {
   if (bfs::create_directories(dir / "testnet")) {
     bfs::create_directories(dir / "testnet" / "wallets");
