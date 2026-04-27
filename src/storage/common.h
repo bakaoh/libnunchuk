@@ -77,8 +77,7 @@ const int GROUP_DEPRECATED_LIST = 34;
 const int ARCHIVED = 35;
 const int MINISCRIPT = 36;
 const int POLICY = 37;
-const int SUPPORT_LIQUID = 38;
-const int LIQUID_WALLET_ID = 39;
+const int LIQUID_WALLET_ID = 38;
 }  // namespace DbKeys
 
 }  // namespace nunchuk

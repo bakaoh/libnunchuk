@@ -3277,16 +3277,13 @@ Wallet NunchukImpl::CreateLiquidWallet(const std::string& mnemonic,
   auto key_name = id == 0 ? "USDT key" : "USDT key #" + std::to_string(id + 1);
   auto ss = CreateSoftwareSigner(
       key_name, seed, passphrase, [](int) { return true; }, false, replace);
-  WalletType wt = WalletType::SINGLE_SIG;
+  WalletType wt = WalletType::LIQUID;
   AddressType at = AddressType::NATIVE_SEGWIT;
   auto signer = GetDefaultSignerFromMasterSigner(ss.get_id(), wt, at);
   auto name =
       id == 0 ? "USDT wallet" : "USDT wallet #" + std::to_string(id + 1);
 
-  Wallet w("", name, 1, 1, {signer}, at, wt, std::time(0));
-  w.set_support_liquid(true);
-  auto wallet = CreateWallet(w);
-
+  auto wallet = CreateWallet(name, 1, 1, {signer}, at, wt);
   if (need_backup) {
     wallet.set_need_backup(true);
     storage_->UpdateWallet(chain_, wallet);
