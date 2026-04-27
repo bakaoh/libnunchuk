@@ -1,5 +1,6 @@
 #include <liquid/wallyutils.hpp>
 
+#include <util/bip32.h>
 #include <util/strencodings.h>
 #include <cstdint>
 #include <cstring>
@@ -54,22 +55,53 @@ class WallySigner {
   ~WallySigner() { bip32_key_free(master_); }
 
   void CacheAddress(uint32_t index) {
-    std::string address = GetAddress(index);
+    std::vector<uint32_t> keypath;
+    std::string formalized = "m/84'/1776'/0'/0/" + std::to_string(index);
+    std::replace(formalized.begin(), formalized.end(), 'h', '\'');
+    if (!ParseHDKeypath(formalized, keypath)) {
+      throw NunchukException(NunchukException::INVALID_PARAMETER,
+                             "Invalid hd keypath");
+    }
+
+    std::string address = GetAddress(keypath);
     std::vector<unsigned char> script_pubkey =
         WallyUtils::GetScriptPubkeyFromAddress(address);
     spk_.emplace(script_pubkey, AddressDetail{index, address});
   }
 
-  std::string GetAddress(uint32_t index) {
+  std::string GetAddress(const std::vector<uint32_t>& keypath) {
     struct ext_key* derived = nullptr;
-    CHECK_WALLY(bip32_key_from_parent_alloc(master_, index,
-                                            BIP32_FLAG_KEY_PRIVATE, &derived));
+    CHECK_WALLY(bip32_key_from_parent_path_alloc(
+        master_, keypath.data(), keypath.size(), BIP32_FLAG_KEY_PRIVATE,
+        &derived));
     char* address = nullptr;
     CHECK_WALLY(wally_bip32_key_to_addr_segwit(
         derived, WallyUtils::C().ADDRESS_FAMILY, 0, &address));
     std::string rs = std::string(address);
     wally_free_string(address);
     bip32_key_free(derived);
+    return rs;
+  }
+
+  std::string GetConfidentialAddress(const std::vector<uint32_t>& path) {
+    std::string address = GetAddress(path);
+    std::vector<unsigned char> script_pubkey =
+        WallyUtils::GetScriptPubkeyFromAddress(address);
+    std::vector<unsigned char> private_blinding_key =
+        GetBlindingKey(script_pubkey);
+
+    std::vector<unsigned char> public_blinding_key(EC_PUBLIC_KEY_LEN);
+    CHECK_WALLY(wally_ec_public_key_from_private_key(
+        private_blinding_key.data(), private_blinding_key.size(),
+        public_blinding_key.data(), public_blinding_key.size()));
+
+    char* conf_address = nullptr;
+    CHECK_WALLY(wally_confidential_addr_from_addr_segwit(
+        address.c_str(), WallyUtils::C().ADDRESS_FAMILY,
+        WallyUtils::C().CONFIDENTIAL_ADDRESS_FAMILY, public_blinding_key.data(),
+        public_blinding_key.size(), &conf_address));
+    std::string rs = std::string(conf_address);
+    wally_free_string(conf_address);
     return rs;
   }
 
