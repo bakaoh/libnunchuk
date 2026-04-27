@@ -87,29 +87,9 @@ void NunchukWalletDb::InitWallet(const Wallet& wallet) {
                         "MASTER_ID        TEXT    NOT NULL,"
                         "LAST_HEALTHCHECK INT     NOT NULL);",
                         NULL, 0, NULL));
-  SQLCHECK(sqlite3_exec(db_,
-                        "CREATE TABLE IF NOT EXISTS LVTX("
-                        "ID TEXT PRIMARY KEY     NOT NULL,"
-                        "VALUE           TEXT    NOT NULL,"
-                        "HEIGHT          INT     NOT NULL,"
-                        "FEE             INT     NOT NULL,"
-                        "MEMO            TEXT    NOT NULL,"
-                        "CHANGEPOS       INT     NOT NULL,"
-                        "BLOCKTIME       INT     NOT NULL,"
-                        "EXTRA           TEXT    NOT NULL);",
-                        NULL, 0, NULL));
-  SQLCHECK(sqlite3_exec(db_,
-                        "CREATE TABLE IF NOT EXISTS LADDRESS("
-                        "ADDR TEXT PRIMARY KEY     NOT NULL,"
-                        "IDX             INT     NOT NULL,"
-                        "INTERNAL        INT     NOT NULL,"
-                        "USED            INT     NOT NULL,"
-                        "UTXO            TEXT);",
-                        NULL, 0, NULL));
   PutString(DbKeys::NAME, wallet.get_name());
   PutString(DbKeys::DESCRIPTION, wallet.get_description());
   PutString(DbKeys::MINISCRIPT, wallet.get_miniscript());
-  PutInt(DbKeys::SUPPORT_LIQUID, wallet.support_liquid() ? 1 : 0);
 
   json immutable_data = {{"m", wallet.get_m()},
                          {"n", wallet.get_n()},
@@ -179,8 +159,6 @@ void NunchukWalletDb::DeleteWallet() {
   SQLCHECK(sqlite3_exec(db_, "DROP TABLE IF EXISTS SIGNER;", NULL, 0, NULL));
   SQLCHECK(sqlite3_exec(db_, "DROP TABLE IF EXISTS ADDRESS;", NULL, 0, NULL));
   SQLCHECK(sqlite3_exec(db_, "DROP TABLE IF EXISTS VTX;", NULL, 0, NULL));
-  SQLCHECK(sqlite3_exec(db_, "DROP TABLE IF EXISTS LVTX;", NULL, 0, NULL));
-  SQLCHECK(sqlite3_exec(db_, "DROP TABLE IF EXISTS LADDRESS;", NULL, 0, NULL));
   txs_cache_.erase(db_file_name_);
   DropTable();
 }
@@ -220,7 +198,6 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   AddressType address_type = immutable_data["address_type"];
   time_t create_date = immutable_data["create_date"];
   int gap_limit = GetInt(DbKeys::GAP_LIMIT);
-  bool support_liquid = IsSupportLiquid();
 
   WalletType wallet_type = WalletType::MULTI_SIG;
   if (immutable_data["wallet_type"] != nullptr) {
@@ -252,7 +229,6 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   wallet.set_need_backup(GetInt(DbKeys::NEED_BACKUP) == 1);
   wallet.set_archived(GetInt(DbKeys::ARCHIVED) == 1);
   wallet.set_wallet_template(wallet_template);
-  wallet.set_support_liquid(support_liquid);
   if (!skip_provider) {
     GetAllAddressData(false);  // update range to max address index
     auto desc = GetDescriptorsImportString(wallet);
@@ -280,9 +256,7 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   if (!skip_balance) {
     wallet.set_balance(GetBalance(false));
     wallet.set_unconfirmed_balance(GetBalance(true));
-    if (support_liquid) {
-      // TODO: liquid
-    }
+    // TODO: liquid
   }
   if (!txs_cache_.count(db_file_name_)) txs_cache_[db_file_name_] = {};
   return wallet;
@@ -327,11 +301,11 @@ std::vector<SingleSigner> NunchukWalletDb::GetSigners() const {
 }
 
 const char* NunchukWalletDb::TxTable() const {
-  return IsSupportLiquid() ? "LVTX" : "VTX";
+  return "VTX";
 }
 
 const char* NunchukWalletDb::AddressTable() const {
-  return IsSupportLiquid() ? "LADDRESS" : "ADDRESS";
+  return "ADDRESS";
 }
 
 void NunchukWalletDb::SetAddress(const std::string& address, int index,
@@ -2521,7 +2495,17 @@ std::string NunchukWalletDb::GetMiniscript() {
 }
 
 bool NunchukWalletDb::IsSupportLiquid() const {
-  return GetInt(DbKeys::SUPPORT_LIQUID) == 1;
+  try {
+    auto data = GetString(DbKeys::IMMUTABLE_DATA);
+    if (!data.empty()) {
+      json immutable_data = json::parse(data);
+      if (immutable_data["wallet_type"] != nullptr) {
+        return immutable_data["wallet_type"] == WalletType::LIQUID;
+      }
+    }
+  } catch (...) {
+  }
+  return false;
 }
 
 }  // namespace nunchuk
