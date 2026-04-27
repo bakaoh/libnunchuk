@@ -105,4 +105,12 @@ bool NunchukAppStateDb::SetHotWalletId(int value) {
   return PutInt(DbKeys::HOTWALLET_ID, value);
 }
 
+int NunchukAppStateDb::GetLiquidWalletId() const {
+  return GetInt(DbKeys::LIQUID_WALLET_ID);
+}
+
+bool NunchukAppStateDb::SetLiquidWalletId(int value) {
+  return PutInt(DbKeys::LIQUID_WALLET_ID, value);
+}
+
 }  // namespace nunchuk
