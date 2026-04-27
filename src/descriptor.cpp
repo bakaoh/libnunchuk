@@ -244,6 +244,10 @@ std::string GetDescriptorForSigners(const std::vector<SingleSigner>& signers,
                                     WalletType wallet_type,
                                     WalletTemplate wallet_template, int index,
                                     bool sorted) {
+  if (wallet_type == WalletType::LIQUID) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported");
+  }
   std::vector<std::string> keys{};
   for (auto&& signer : signers) {
     auto eii = signer.get_external_internal_index();

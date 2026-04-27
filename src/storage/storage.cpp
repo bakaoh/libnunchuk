@@ -789,7 +789,11 @@ void NunchukStorage::CacheMasterSignerXPub(
   }
 
   auto cacheNumber = [&](WalletType w, AddressType a) {
-    if (is_software) return 10;
+    if (is_software) {
+      if (w == WalletType::LIQUID) return 1;
+      return 10;
+    }
+    if (w == WalletType::LIQUID) return 0;
     if (is_bitbox2) {
       if (w == WalletType::ESCROW) return 0;
       if (w == WalletType::MULTI_SIG && a == AddressType::LEGACY) return 0;
@@ -849,6 +853,7 @@ void NunchukStorage::CacheMasterSignerXPub(
   cacheIndex(WalletType::SINGLE_SIG, AddressType::NATIVE_SEGWIT);
   cacheIndex(WalletType::SINGLE_SIG, AddressType::NESTED_SEGWIT);
   cacheIndex(WalletType::SINGLE_SIG, AddressType::LEGACY);
+  cacheIndex(WalletType::LIQUID, AddressType::NATIVE_SEGWIT);
   if (!is_nfc) {
     cacheIndex(WalletType::SINGLE_SIG, AddressType::TAPROOT);
     cacheIndex(WalletType::MULTI_SIG, AddressType::TAPROOT);
@@ -1019,7 +1024,8 @@ Wallet NunchukStorage::GetWallet(Chain chain, const std::string& id,
   return true_wallet;
 }
 
-bool NunchukStorage::IsSupportLiquid(Chain chain, const std::string& wallet_id) {
+bool NunchukStorage::IsSupportLiquid(Chain chain,
+                                     const std::string& wallet_id) {
   std::shared_lock<std::shared_mutex> lock(access_);
   return GetWalletDb(chain, wallet_id).IsSupportLiquid();
 }
