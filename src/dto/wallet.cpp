@@ -252,11 +252,9 @@ void Wallet::post_update() {
   }
 }
 
-bool Wallet::support_liquid() const { return support_liquid_; }
 Amount Wallet::get_asset_balance(const AssetId& asset_id) const {
   return asset_balances_.at(asset_id);
 }
-void Wallet::set_support_liquid(bool value) { support_liquid_ = value; }
 void Wallet::set_asset_balance(const AssetId& asset_id, const Amount& value) {
   asset_balances_[asset_id] = value;
 }

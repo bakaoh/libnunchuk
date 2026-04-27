@@ -569,7 +569,6 @@ class NUNCHUK_EXPORT Wallet {
   bool is_archived() const;
   std::string get_miniscript(DescriptorPath key_path = DescriptorPath::ANY,
                              int index = -1) const;
-  bool support_liquid() const;
   Amount get_asset_balance(const AssetId& asset_id) const;
 
   void set_name(const std::string& value);
@@ -588,7 +587,6 @@ class NUNCHUK_EXPORT Wallet {
   void set_need_backup(bool value);
   void set_archived(bool value);
   void set_miniscript(const std::string& value);
-  void set_support_liquid(bool value);
   void set_asset_balance(const AssetId& asset_id, const Amount& value);
 
  private:
@@ -611,7 +609,6 @@ class NUNCHUK_EXPORT Wallet {
   bool need_backup_{false};
   bool archived_{false};
   std::string miniscript_;
-  bool support_liquid_{false};
   std::map<AssetId, Amount> asset_balances_{};
 };
 
