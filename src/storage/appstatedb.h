@@ -53,6 +53,8 @@ class NunchukAppStateDb : public NunchukDb {
   bool RemoveDeletedTransaction(const std::string &id);
   int GetHotWalletId() const;
   bool SetHotWalletId(int value);
+  int GetLiquidWalletId() const;
+  bool SetLiquidWalletId(int value);
 
  private:
   friend class NunchukStorage;

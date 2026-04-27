@@ -93,6 +93,8 @@ class NunchukStorage {
   std::string GetMasterXprv(Chain chain, const std::string &id);
   int GetHotWalletId();
   bool SetHotWalletId(int value);
+  int GetLiquidWalletId();
+  bool SetLiquidWalletId(int value);
   bool HasSigner(Chain chain, const std::string &signer_id);
   bool HasSigner(Chain chain, const SingleSigner &signer);
 
