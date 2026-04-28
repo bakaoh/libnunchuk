@@ -24,6 +24,11 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <memory>
+
+namespace nunchuk::wally {
+class WallySigner;
+}  // namespace nunchuk::wally
 
 namespace nunchuk {
 
@@ -37,6 +42,8 @@ struct AddressData {
 class NunchukWalletDb : public NunchukDb {
  public:
   using NunchukDb::NunchukDb;
+
+  void SetWallySigner(std::shared_ptr<wally::WallySigner> signer);
 
   void InitWallet(const Wallet &wallet);
   void MaybeMigrate();
@@ -170,6 +177,9 @@ class NunchukWalletDb : public NunchukDb {
   static std::map<std::string, std::map<std::pair<int, int>, bool>>
       collection_auto_add_;
   static std::map<std::string, std::map<std::string, Transaction>> txs_cache_;
+
+  std::shared_ptr<wally::WallySigner> wally_signer_;
+
   friend class NunchukStorage;
 };
 
