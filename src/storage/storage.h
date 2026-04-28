@@ -357,6 +357,8 @@ class NunchukStorage {
   static std::shared_mutex access_;
 
   NunchukWalletDb GetWalletDb(Chain chain, const std::string &id);
+  // Return WalletDb with WallySigner injected if WalletType is LIQUID
+  NunchukWalletDb GetLiquidSupportedWalletDb(Chain chain, const std::string &id);
   NunchukSignerDb GetSignerDb(Chain chain, const std::string &id);
   NunchukAppStateDb GetAppStateDb(Chain chain);
   NunchukPrimaryDb GetPrimaryDb(Chain chain);

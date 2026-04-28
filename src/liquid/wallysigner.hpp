@@ -1,3 +1,23 @@
+/*
+ * This file is part of libnunchuk (https://github.com/nunchuk-io/libnunchuk).
+ * Copyright (c) 2026 Enigmo.
+ *
+ * libnunchuk is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3.
+ *
+ * libnunchuk is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with libnunchuk. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#ifndef NUNCHUK_WALLY_SIGNER_HPP
+#define NUNCHUK_WALLY_SIGNER_HPP
+
 #include <liquid/wallyutils.hpp>
 
 #include <util/bip32.h>
@@ -52,7 +72,36 @@ class WallySigner {
         master_blinding_key_.size()));
   }
 
+  WallySigner(const WallySigner&) = delete;
+  WallySigner& operator=(const WallySigner&) = delete;
+
+  WallySigner(WallySigner&& other) noexcept
+      : master_(other.master_),
+        master_blinding_key_(std::move(other.master_blinding_key_)),
+        spk_(std::move(other.spk_)),
+        tx_flags_(other.tx_flags_) {
+    other.master_ = nullptr;
+  }
+
+  WallySigner& operator=(WallySigner&& other) noexcept {
+    if (this == &other) return *this;
+    bip32_key_free(master_);
+    master_ = other.master_;
+    other.master_ = nullptr;
+    master_blinding_key_ = std::move(other.master_blinding_key_);
+    spk_ = std::move(other.spk_);
+    tx_flags_ = other.tx_flags_;
+    return *this;
+  }
+
   ~WallySigner() { bip32_key_free(master_); }
+
+  std::string GetMasterFingerprint() const {
+    std::vector<unsigned char> fingerprint(BIP32_KEY_FINGERPRINT_LEN);
+    CHECK_WALLY(bip32_key_get_fingerprint(master_, fingerprint.data(),
+                                          fingerprint.size()));
+    return WallyUtils::HexFromBytes(fingerprint.data(), fingerprint.size());
+  }
 
   void CacheAddress(uint32_t index) {
     std::vector<uint32_t> keypath;
@@ -717,3 +766,5 @@ class WallySigner {
   }
 };
 }  // namespace nunchuk::wally
+
+#endif  // NUNCHUK_WALLY_SIGNER_HPP

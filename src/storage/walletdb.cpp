@@ -57,6 +57,11 @@ std::map<std::string, std::map<std::pair<int, int>, bool>>
 std::map<std::string, std::map<std::string, Transaction>>
     NunchukWalletDb::txs_cache_;
 
+void NunchukWalletDb::SetWallySigner(
+    std::shared_ptr<wally::WallySigner> signer) {
+  wally_signer_ = std::move(signer);
+}
+
 void NunchukWalletDb::InitWallet(const Wallet& wallet) {
   CreateTable();
   // Note: when we update VTX table model, all these functions: CreatePsbt,
@@ -300,13 +305,9 @@ std::vector<SingleSigner> NunchukWalletDb::GetSigners() const {
   return signers;
 }
 
-const char* NunchukWalletDb::TxTable() const {
-  return "VTX";
-}
+const char* NunchukWalletDb::TxTable() const { return "VTX"; }
 
-const char* NunchukWalletDb::AddressTable() const {
-  return "ADDRESS";
-}
+const char* NunchukWalletDb::AddressTable() const { return "ADDRESS"; }
 
 void NunchukWalletDb::SetAddress(const std::string& address, int index,
                                  bool internal, const std::string& utxos) {
