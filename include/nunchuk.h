@@ -2042,9 +2042,7 @@ class NUNCHUK_EXPORT Nunchuk {
                                     const std::string& passphrase = {},
                                     bool need_backup = true,
                                     bool replace = true) = 0;
-  virtual Wallet CreateLiquidWallet(const std::string& softwaresigner_id,
-                                    bool need_backup = true,
-                                    bool replace = true) = 0;
+  virtual Wallet CreateLiquidWallet(const SingleSigner& signer) = 0;
   virtual std::map<AssetId, Amount> GetAddressAssets(
       const std::string& wallet_id, const std::string& address) = 0;
 
