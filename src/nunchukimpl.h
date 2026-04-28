@@ -750,9 +750,7 @@ class NunchukImpl : public Nunchuk {
                             const std::string& passphrase = {},
                             bool need_backup = true,
                             bool replace = true) override;
-  Wallet CreateLiquidWallet(const std::string& softwaresigner_id,
-                            bool need_backup = true,
-                            bool replace = true) override;
+  Wallet CreateLiquidWallet(const SingleSigner& signer) override;
   std::map<AssetId, Amount> GetAddressAssets(
       const std::string& wallet_id, const std::string& address) override;
 

@@ -163,20 +163,23 @@ Wallet NunchukImpl::CloneWallet(const std::string& wallet_id,
   return storage_->CreateDecoyWallet(chain_, wallet, decoy_pin);
 }
 
+inline std::string GetDefaultName(const std::string& prefix, int id) {
+  return id == 0 ? prefix : prefix + " #" + std::to_string(id + 1);
+}
+
 Wallet NunchukImpl::CreateHotWallet(const std::string& mnemonic,
                                     const std::string& passphrase,
                                     bool need_backup, bool replace) {
   std::string seed = mnemonic.empty() ? Utils::GenerateMnemonic() : mnemonic;
   auto id = storage_->GetHotWalletId();
-  auto key_name = id == 0 ? "My key" : "My key #" + std::to_string(id + 1);
+  auto key_name = GetDefaultName("My key", id);
   auto ss = CreateSoftwareSigner(
       key_name, seed, passphrase, [](int) { return true; }, false, replace);
+  auto wallet_name = GetDefaultName("My hot wallet", id);
   WalletType wt = WalletType::SINGLE_SIG;
   AddressType at = AddressType::NATIVE_SEGWIT;
   auto signer = GetDefaultSignerFromMasterSigner(ss.get_id(), wt, at);
-  auto name =
-      id == 0 ? "My hot wallet" : "My hot wallet #" + std::to_string(id + 1);
-  auto wallet = CreateWallet(name, 1, 1, {signer}, at, wt);
+  auto wallet = CreateWallet(wallet_name, 1, 1, {signer}, at, wt);
   if (need_backup) {
     wallet.set_need_backup(true);
     storage_->UpdateWallet(chain_, wallet);
@@ -3266,16 +3269,14 @@ Wallet NunchukImpl::CreateLiquidWallet(const std::string& mnemonic,
                                        bool need_backup, bool replace) {
   std::string seed = mnemonic.empty() ? Utils::GenerateMnemonic() : mnemonic;
   auto id = storage_->GetLiquidWalletId();
-  auto key_name = id == 0 ? "USDT key" : "USDT key #" + std::to_string(id + 1);
+  auto key_name = GetDefaultName("USDT key", id);
   auto ss = CreateSoftwareSigner(
       key_name, seed, passphrase, [](int) { return true; }, false, replace);
+  auto wallet_name = GetDefaultName("USDT wallet", id);
   WalletType wt = WalletType::LIQUID;
   AddressType at = AddressType::NATIVE_SEGWIT;
   auto signer = GetDefaultSignerFromMasterSigner(ss.get_id(), wt, at);
-  auto name =
-      id == 0 ? "USDT wallet" : "USDT wallet #" + std::to_string(id + 1);
-
-  auto wallet = CreateWallet(name, 1, 1, {signer}, at, wt);
+  auto wallet = CreateWallet(wallet_name, 1, 1, {signer}, at, wt);
   if (need_backup) {
     wallet.set_need_backup(true);
     storage_->UpdateWallet(chain_, wallet);
@@ -3284,10 +3285,18 @@ Wallet NunchukImpl::CreateLiquidWallet(const std::string& mnemonic,
   return wallet;
 }
 
-Wallet NunchukImpl::CreateLiquidWallet(const std::string& softwaresigner_id,
-                                       bool need_backup, bool replace) {
-  // return Wallet::CreateLiquidWallet(softwaresigner_id, need_backup, replace);
-  return Wallet{};
+Wallet NunchukImpl::CreateLiquidWallet(const SingleSigner& signer) {
+  if (signer.get_type() != SignerType::SOFTWARE) {
+    throw NunchukException(NunchukException::INVALID_PARAMETER,
+                           "Signer type not supported");
+  }
+  auto id = storage_->GetLiquidWalletId();
+  auto wallet_name = GetDefaultName("USDT wallet", id);
+  WalletType wt = WalletType::LIQUID;
+  AddressType at = AddressType::NATIVE_SEGWIT;
+  auto wallet = CreateWallet(wallet_name, 1, 1, {signer}, at, wt);
+  storage_->SetLiquidWalletId(id + 1);
+  return wallet;
 }
 
 std::map<AssetId, Amount> NunchukImpl::GetAddressAssets(
