@@ -418,6 +418,25 @@ NunchukWalletDb NunchukStorage::GetWalletDb(Chain chain,
   return NunchukWalletDb{chain, id, db_file.string(), passphrase_};
 }
 
+NunchukWalletDb NunchukStorage::GetLiquidSupportedWalletDb(
+    Chain chain, const std::string& id) {
+  auto wallet_db = GetWalletDb(chain, id);
+  if (wallet_db.IsSupportLiquid()) {
+    auto signers = wallet_db.GetSigners();
+    if (!signers.empty()) {
+      const std::string mid =
+          ba::to_lower_copy(signers.front().get_master_signer_id());
+      auto signer_db = GetSignerDb(chain, mid);
+      std::string signer_passphrase =
+          signer_passphrase_.count(mid) ? signer_passphrase_.at(mid) : "";
+      auto wally_signer = signer_db.GetWallySigner(signer_passphrase);
+      wallet_db.SetWallySigner(
+          std::make_shared<wally::WallySigner>(std::move(wally_signer)));
+    }
+  }
+  return wallet_db;
+}
+
 NunchukSignerDb NunchukStorage::GetSignerDb(Chain chain,
                                             const std::string& id) {
   bfs::path db_file = GetSignerDir(chain, id);
