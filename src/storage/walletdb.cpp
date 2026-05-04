@@ -261,7 +261,7 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   if (!skip_balance) {
     wallet.set_balance(GetBalance(false));
     wallet.set_unconfirmed_balance(GetBalance(true));
-    // TODO: liquid
+    // TODO: liquid balance
   }
   if (!txs_cache_.count(db_file_name_)) txs_cache_[db_file_name_] = {};
   return wallet;
@@ -411,6 +411,8 @@ std::map<std::string, AddressData> NunchukWalletDb::GetAllAddressData(
     auto addr = CoreUtils::getInstance().DeriveAddress(
         wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL));
     addresses[addr] = {addr, 0, false, false};
+  } else if (wallet.get_wallet_type() == WalletType::LIQUID) {
+    // TODO: liquid addresses
   } else {
     int index = 0;
     auto internal_addr = CoreUtils::getInstance().DeriveAddresses(
