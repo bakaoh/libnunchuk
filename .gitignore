@@ -2,3 +2,4 @@
 .cursor/
 build*/
 .DS_Store
+playground/
