@@ -1634,16 +1634,21 @@ Transaction NunchukImpl::DraftTransaction(
     }
 
     if (m_outputs.empty()) {
-      if (origin_tx.get_user_outputs().empty()) {
+      const auto& origin_outputs = origin_tx.get_outputs();
+      const bool has_user_amount = std::any_of(
+          origin_outputs.begin(), origin_outputs.end(),
+          [](const TxOutput& o) { return o.userAmount != 0; });
+      if (!has_user_amount) {
         subtract_fee_from_amount = false;
-        for (size_t i = 0; i < origin_tx.get_outputs().size(); i++) {
-          if (i == origin_tx.get_change_index()) continue;
-          auto output = origin_tx.get_outputs()[i];
-          m_outputs[output.first] = output.second;
+        for (const auto& output : origin_outputs) {
+          if (output.isChange) continue;
+          m_outputs[output.address] = output.amount;
         }
       } else {
-        for (auto&& output : origin_tx.get_user_outputs()) {
-          m_outputs[output.first] = output.second;
+        for (const auto& output : origin_outputs) {
+          if (output.userAmount != 0) {
+            m_outputs[output.address] = output.userAmount;
+          }
         }
       }
     }
@@ -1670,18 +1675,23 @@ Transaction NunchukImpl::DraftTransaction(
   auto tx =
       GetTransactionFromPartiallySignedTransaction(DecodePsbt(psbt), wallet);
 
-  Amount sub_amount{0};
-  for (size_t i = 0; i < tx.get_outputs().size(); i++) {
-    if (i == change_pos) continue;
-    sub_amount += tx.get_outputs()[i].second;
+  if (change_pos >= 0 &&
+      static_cast<size_t>(change_pos) < tx.mutable_outputs().size()) {
+    tx.mutable_outputs()[change_pos].isChange = true;
   }
-  for (auto&& output : m_outputs) {
-    tx.add_user_output({output.first, output.second});
+
+  Amount sub_amount{0};
+  for (const auto& out : tx.get_outputs()) {
+    if (out.isChange) continue;
+    sub_amount += out.amount;
+  }
+  for (auto& out : tx.mutable_outputs()) {
+    auto it = m_outputs.find(out.address);
+    if (it != m_outputs.end()) out.userAmount = it->second;
   }
 
   tx.set_m(wallet.get_m());
   tx.set_fee(fee);
-  tx.set_change_index(change_pos);
   tx.set_receive(false);
   tx.set_sub_amount(sub_amount);
   tx.set_fee_rate(fee_rate);
@@ -1756,16 +1766,19 @@ Transaction NunchukImpl::ReplaceTransaction(const std::string& wallet_id,
   }
 
   std::map<std::string, Amount> outputs;
-  if (tx.get_user_outputs().empty()) {
+  const auto& tx_outputs = tx.get_outputs();
+  const bool has_user_amount =
+      std::any_of(tx_outputs.begin(), tx_outputs.end(),
+                  [](const TxOutput& o) { return o.userAmount != 0; });
+  if (!has_user_amount) {
     tx.set_subtract_fee_from_amount(false);
-    for (size_t i = 0; i < tx.get_outputs().size(); i++) {
-      if (i == tx.get_change_index()) continue;
-      auto output = tx.get_outputs()[i];
-      outputs[output.first] = output.second;
+    for (const auto& output : tx_outputs) {
+      if (output.isChange) continue;
+      outputs[output.address] = output.amount;
     }
   } else {
-    for (auto&& output : tx.get_user_outputs()) {
-      outputs[output.first] = output.second;
+    for (const auto& output : tx_outputs) {
+      if (output.userAmount != 0) outputs[output.address] = output.userAmount;
     }
   }
   auto inputs = GetUnspentOutputsFromTxInputs(wallet_id, tx.get_inputs());
@@ -1914,7 +1927,7 @@ Amount NunchukImpl::GetTotalAmount(const std::string& wallet_id,
   Amount total = 0;
   for (auto&& input : inputs) {
     auto tx = GetTransaction(wallet_id, input.txid);
-    total += tx.get_outputs()[input.vout].second;
+    total += tx.get_outputs()[input.vout].amount;
   }
   return total;
 }
@@ -2779,7 +2792,7 @@ bool NunchukImpl::IsCPFP(const std::string& wallet_id, const Transaction& tx,
           Amount prev_output_amount = std::accumulate(
               std::begin(prev_tx.get_outputs()),
               std::end(prev_tx.get_outputs()), Amount(0),
-              [](Amount acc, const TxOutput& out) { return acc + out.second; });
+              [](Amount acc, const TxOutput& out) { return acc + out.amount; });
           package_fee += prev_input_amount - prev_output_amount;
         }
         break;

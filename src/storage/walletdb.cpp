@@ -241,7 +241,7 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
     // workaround for GetTransactionFromPartiallySignedTransaction bug
     auto txs = GetTransactions();
     for (auto&& tx : txs) {
-      for (auto&& output : tx.get_outputs()) UseAddress(output.first);
+      for (auto&& output : tx.get_outputs()) UseAddress(output.address);
     }
     try {
       sqlite3_stmt* stmt;
@@ -435,7 +435,7 @@ std::map<std::string, AddressData> NunchukWalletDb::GetAllAddressData(
   if (check_used) {
     auto txs = GetTransactions();
     for (auto&& tx : txs) {
-      for (auto&& output : tx.get_outputs()) UseAddress(output.first);
+      for (auto&& output : tx.get_outputs()) UseAddress(output.address);
     }
     try {
       sqlite3_stmt* stmt;
@@ -984,7 +984,10 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     tx.set_address_type(wallet.get_address_type());
     tx.set_fee(Amount(fee));
     tx.set_fee_rate(0);
-    tx.set_change_index(change_pos);
+    if (change_pos >= 0 &&
+        static_cast<size_t>(change_pos) < tx.mutable_outputs().size()) {
+      tx.mutable_outputs()[change_pos].isChange = true;
+    }
     tx.set_blocktime(blocktime);
     tx.set_schedule_time(-1);
     // Default value, will set in FillSendReceiveData
@@ -1002,7 +1005,12 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     if (!extra.empty()) {
       FillExtra(extra, tx);
     }
+<<<<<<< HEAD
     for (auto&& output : tx.get_outputs()) UseAddress(output.first);
+=======
+    SQLCHECK(sqlite3_finalize(stmt));
+    for (auto&& output : tx.get_outputs()) UseAddress(output.address);
+>>>>>>> 8465f43 (Refactor TxOutput)
     auto new_memo = GetTransactionMemo(tx_id);
     if (new_memo) {
       tx.set_memo(new_memo.value());
@@ -1091,7 +1099,10 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
       tx.set_address_type(wallet.get_address_type());
       tx.set_fee(Amount(fee));
       tx.set_fee_rate(0);
-      tx.set_change_index(change_pos);
+      if (change_pos >= 0 &&
+          static_cast<size_t>(change_pos) < tx.mutable_outputs().size()) {
+        tx.mutable_outputs()[change_pos].isChange = true;
+      }
       tx.set_blocktime(blocktime);
       tx.set_schedule_time(-1);
       tx.set_receive(false);
@@ -1202,10 +1213,10 @@ void NunchukWalletDb::FillExtra(const std::string& extra,
       }
     }
     if (extra_json["outputs"] != nullptr) {
-      for (auto&& output : tx.get_outputs()) {
-        auto amount = extra_json["outputs"][output.first];
+      for (auto& output : tx.mutable_outputs()) {
+        auto amount = extra_json["outputs"][output.address];
         if (amount != nullptr) {
-          tx.add_user_output({output.first, Amount(amount)});
+          output.userAmount = Amount(amount);
         }
       }
     }
@@ -1278,20 +1289,21 @@ void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
     } catch (StorageException& se) {
       if (se.code() != StorageException::TX_NOT_FOUND) throw;
     }
-    if (isMyAddress(prev_out.first)) {
-      total_amount += prev_out.second;
+    if (isMyAddress(prev_out.address)) {
+      total_amount += prev_out.amount;
       is_send_tx = true;
     }
   }
   if (is_send_tx) {
     Amount send_amount{0};
-    for (size_t i = 0; i < tx.get_outputs().size(); i++) {
-      auto output = tx.get_outputs()[i];
-      total_amount -= output.second;
-      if (!isMyAddress(output.first)) {
-        send_amount += output.second;
-      } else if (tx.get_change_index() < 0 && isMyChange(output.first)) {
-        tx.set_change_index(i);
+    auto& outputs = tx.mutable_outputs();
+    for (size_t i = 0; i < outputs.size(); i++) {
+      auto& output = outputs[i];
+      total_amount -= output.amount;
+      if (!isMyAddress(output.address)) {
+        send_amount += output.amount;
+      } else if (!output.isChange && isMyChange(output.address)) {
+        output.isChange = true;
       }
     }
     tx.set_fee(total_amount);
@@ -1304,10 +1316,10 @@ void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
     }
   } else {
     Amount receive_amount{0};
-    for (auto&& output : tx.get_outputs()) {
-      if (isMyAddress(output.first)) {
-        receive_amount += output.second;
-        tx.add_receive_output(output);
+    for (auto& output : tx.mutable_outputs()) {
+      if (isMyAddress(output.address)) {
+        receive_amount += output.amount;
+        output.isReceive = true;
       }
     }
     tx.set_receive(true);
@@ -2227,13 +2239,13 @@ std::map<std::string, UnspentOutput> NunchukWalletDb::GetCoinsFromTransactions(
     for (auto&& input : tx.get_inputs()) {
       if (tx_map.count(input.txid) == 0) continue;
       auto prev_tx = tx_map[input.txid];
-      auto address = prev_tx.get_outputs()[input.vout].first;
+      auto address = prev_tx.get_outputs()[input.vout].address;
       if (!isMyAddress(address)) continue;
       auto id = CoinId(input.txid, input.vout);
       coins[id].set_txid(input.txid);
       coins[id].set_vout(input.vout);
       coins[id].set_address(address);
-      coins[id].set_amount(prev_tx.get_outputs()[input.vout].second);
+      coins[id].set_amount(prev_tx.get_outputs()[input.vout].amount);
       coins[id].set_height(prev_tx.get_height());
       coins[id].set_blocktime(prev_tx.get_blocktime());
       if (tx.get_schedule_time() > coins[id].get_schedule_time()) {
@@ -2257,20 +2269,20 @@ std::map<std::string, UnspentOutput> NunchukWalletDb::GetCoinsFromTransactions(
     int nout = tx.get_outputs().size();
     for (int vout = 0; vout < nout; vout++) {
       auto output = tx.get_outputs()[vout];
-      if (!isMyAddress(output.first)) continue;
+      if (!isMyAddress(output.address)) continue;
       if (tx.get_height() < 0) continue;
       auto id = CoinId(tx.get_txid(), vout);
       coins[id].set_txid(tx.get_txid());
       coins[id].set_vout(vout);
-      coins[id].set_address(output.first);
-      coins[id].set_amount(output.second);
+      coins[id].set_address(output.address);
+      coins[id].set_amount(output.amount);
       coins[id].set_height(tx.get_height());
       coins[id].set_blocktime(tx.get_blocktime());
       set_status(id, tx.get_height() > 0
                          ? CoinStatus::CONFIRMED
                          : CoinStatus::INCOMING_PENDING_CONFIRMATION);
       coins[id].set_memo(tx.get_memo());
-      coins[id].set_change(isMyChange(output.first));
+      coins[id].set_change(isMyChange(output.address));
     }
   }
   return coins;
@@ -2329,7 +2341,7 @@ std::vector<std::vector<UnspentOutput>> NunchukWalletDb::GetAncestry(
 void NunchukWalletDb::AutoAddNewCoins(const Transaction& tx) {
   std::vector<int> my_vout{};
   for (size_t i = 0; i < tx.get_outputs().size(); i++) {
-    if (IsMyAddress(tx.get_outputs()[i].first)) my_vout.push_back(i);
+    if (IsMyAddress(tx.get_outputs()[i].address)) my_vout.push_back(i);
   }
 
   auto auto_add = GetAutoAddData();
@@ -2481,7 +2493,6 @@ std::map<std::string, Transaction> NunchukWalletDb::GetDummyTxs() {
         GetTransactionFromPartiallySignedTransaction(DecodePsbt(psbt), wallet);
     tx.set_fee(150);
     tx.set_sub_amount(10000);
-    tx.set_change_index(-1);
     tx.set_subtract_fee_from_amount(false);
     tx.set_psbt(psbt);
     tx.set_receive(false);
@@ -2519,7 +2530,6 @@ Transaction NunchukWalletDb::GetDummyTx(const std::string& id) {
         GetTransactionFromPartiallySignedTransaction(DecodePsbt(psbt), wallet);
     tx.set_fee(150);
     tx.set_sub_amount(10000);
-    tx.set_change_index(-1);
     tx.set_subtract_fee_from_amount(false);
     tx.set_psbt(psbt);
     tx.set_receive(false);
