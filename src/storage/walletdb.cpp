@@ -515,6 +515,7 @@ std::pair<int, bool> NunchukWalletDb::GetAddressIndex(
 }
 
 Amount NunchukWalletDb::GetAddressBalance(const std::string& address) {
+  // TODO: liquid balance
   auto coins = GetCoins();
   Amount balance = 0;
   for (auto&& coin : coins) {
@@ -640,6 +641,7 @@ void NunchukWalletDb::SetReplacedBy(const std::string& old_txid,
 bool NunchukWalletDb::UpdateTransaction(const std::string& raw_tx, int height,
                                         time_t blocktime,
                                         const std::string& reject_msg) {
+  // TODO: liquid update transaction
   auto wallet = GetWallet(true, true);
   if (height == -1) {
     auto [tx, is_hex_tx] = GetTransactionFromStr(raw_tx, wallet, -1);
@@ -772,6 +774,10 @@ Transaction NunchukWalletDb::CreatePsbt(
     int change_pos, const std::map<std::string, Amount>& outputs,
     Amount fee_rate, bool subtract_fee_from_amount,
     const std::string& replace_tx) {
+  if (IsSupportLiquid()) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported psbt creation");
+  }
   PartiallySignedTransaction psbtx = DecodePsbt(psbt);
   std::string tx_id = psbtx.tx.value().GetHash().GetHex();
 
@@ -809,6 +815,10 @@ Transaction NunchukWalletDb::CreatePsbt(
 }
 
 bool NunchukWalletDb::UpdatePsbt(const std::string& psbt) {
+  if (IsSupportLiquid()) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported psbt update");
+  }
   sqlite3_stmt* stmt;
   std::string sql = std::string("UPDATE ") + TxTable() +
                     " SET VALUE = ?1 WHERE ID = ?2 AND HEIGHT = -1;";
@@ -902,6 +912,9 @@ bool NunchukWalletDb::ReplaceTxId(const std::string& txid,
 }
 
 std::string NunchukWalletDb::GetPsbt(const std::string& tx_id) const {
+  if (IsSupportLiquid()) {
+    return "";
+  }
   sqlite3_stmt* stmt;
   std::string sql = std::string("SELECT VALUE FROM ") + TxTable() +
                     " WHERE ID = ? AND HEIGHT = -1;";
@@ -929,6 +942,9 @@ std::pair<std::string, bool> NunchukWalletDb::GetPsbtOrRawTx(
   if (sqlite3_column_text(stmt, 0)) {
     std::string rs = std::string((char*)sqlite3_column_text(stmt, 0));
     SQLCHECK(sqlite3_finalize(stmt));
+    if (IsSupportLiquid()) {
+      return {rs, true};
+    }
     auto [tx, is_hex_tx] = GetTransactionFromStr(rs, {}, -1);
     return {rs, is_hex_tx};
   } else {
@@ -938,6 +954,7 @@ std::pair<std::string, bool> NunchukWalletDb::GetPsbtOrRawTx(
 }
 
 Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
+  // TODO: liquid get transaction
   if (txs_cache_[db_file_name_].count(tx_id))
     return txs_cache_[db_file_name_][tx_id];
   auto wallet = GetWallet(true, true);
@@ -1021,6 +1038,9 @@ bool NunchukWalletDb::SetUtxos(const std::string& address,
 }
 
 Amount NunchukWalletDb::GetBalance(bool include_mempool) {
+  if (IsSupportLiquid()) {
+    return 0;
+  }
   auto coins = GetCoins();
   Amount balance = 0;
   for (auto&& coin : coins) {
@@ -1036,6 +1056,7 @@ Amount NunchukWalletDb::GetBalance(bool include_mempool) {
 }
 
 std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
+  // TODO: liquid get transactions
   auto wallet = GetWallet(true, true);
 
   sqlite3_stmt* stmt;
@@ -1104,6 +1125,10 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
 }
 
 std::string NunchukWalletDb::FillPsbt(const std::string& base64_psbt) {
+  if (IsSupportLiquid()) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported psbt fill");
+  }
   auto psbt = DecodePsbt(base64_psbt);
   if (!psbt.tx.has_value()) return base64_psbt;
 
@@ -1207,6 +1232,7 @@ void NunchukWalletDb::FillExtra(const std::string& extra,
 
 // TODO (bakaoh): consider persisting these data
 void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
+  // TODO: liquid fill send receive data
   auto allAddr = GetAllAddressData();
   auto isMyAddress = [&](const std::string& address) {
     return allAddr.count(address);
@@ -2152,6 +2178,11 @@ void NunchukWalletDb::ImportBIP329(const std::string& data) {
 
 std::map<std::string, UnspentOutput> NunchukWalletDb::GetCoinsFromTransactions(
     const std::vector<Transaction>& transactions) {
+  if (IsSupportLiquid()) {
+    throw NunchukException(
+        NunchukException::INVALID_WALLET_TYPE,
+        "Liquid wallet is not supported get coins from transactions");
+  }
   auto allAddr = GetAllAddressData();
   auto isMyAddress = [&](const std::string& address) {
     return allAddr.count(address);
@@ -2244,6 +2275,9 @@ std::map<std::string, UnspentOutput> NunchukWalletDb::GetCoinsFromTransactions(
 }
 
 std::vector<UnspentOutput> NunchukWalletDb::GetCoins() {
+  if (IsSupportLiquid()) {
+    return {};
+  }
   auto transactions = GetTransactions();
   auto coins = GetCoinsFromTransactions(transactions);
   std::vector<UnspentOutput> rs;
@@ -2255,6 +2289,10 @@ std::vector<UnspentOutput> NunchukWalletDb::GetCoins() {
 
 std::vector<std::vector<UnspentOutput>> NunchukWalletDb::GetAncestry(
     const std::string& tx_id, int vout) {
+  if (IsSupportLiquid()) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Liquid wallet is not supported get ancestry");
+  }
   auto transactions = GetTransactions();
   auto coins = GetCoinsFromTransactions(transactions);
   std::map<std::string, Transaction> tx_map;
