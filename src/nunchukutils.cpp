@@ -168,8 +168,9 @@ bool Utils::IsValidFingerPrint(const std::string& value) {
 }
 
 bool Utils::IsDustOutput(const TxOutput& txout) {
-  CScript destScript = GetScriptForDestination(DecodeDestination(txout.first));
-  CTxOut ctxout(txout.second, destScript);
+  CScript destScript =
+      GetScriptForDestination(DecodeDestination(txout.address));
+  CTxOut ctxout(txout.amount, destScript);
   return IsDust(ctxout, CFeeRate(DUST_RELAY_TX_FEE));
 }
 
@@ -793,7 +794,6 @@ Transaction Utils::DecodeDummyTx(const Wallet& wallet,
       DecodePsbt(base64_psbt), wallet);
   tx.set_fee(150);
   tx.set_sub_amount(10000);
-  tx.set_change_index(-1);
   tx.set_subtract_fee_from_amount(false);
   tx.set_psbt(base64_psbt);
   tx.set_receive(false);
