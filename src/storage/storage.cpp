@@ -1677,14 +1677,23 @@ std::string NunchukStorage::ExportBackup() {
           if (tx.get_status() != TransactionStatus::PENDING_SIGNATURES)
             continue;
           json outputs = json::array();
-          for (auto&& o : tx.get_user_outputs()) {
-            outputs.push_back({{"address", o.first}, {"amount", o.second}});
+          for (const auto& o : tx.get_outputs()) {
+            if (o.userAmount != 0) {
+              outputs.push_back({{"address", o.address}, {"amount", o.userAmount}});
+            }
+          }
+          int change_pos = -1;
+          for (size_t i = 0; i < tx.get_outputs().size(); i++) {
+            if (tx.get_outputs()[i].isChange) {
+              change_pos = static_cast<int>(i);
+              break;
+            }
           }
           wallet["pending_signatures"].push_back(
               {{"psbt", tx.get_psbt()},
                {"fee", tx.get_fee()},
                {"memo", tx.get_memo()},
-               {"change_pos", tx.get_change_index()},
+               {"change_pos", change_pos},
                {"fee_rate", tx.get_fee_rate()},
                {"subtract_fee_from_amount", tx.subtract_fee_from_amount()},
                {"outputs", outputs}});

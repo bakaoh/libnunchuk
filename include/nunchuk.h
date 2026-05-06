@@ -71,7 +71,24 @@ struct TxInput {
 
   bool operator!=(const TxInput& other) const { return !(*this == other); }
 };
-typedef std::pair<std::string, Amount> TxOutput;    // address-amount pair
+struct TxOutput {
+  std::string address;
+  Amount amount{};
+  bool isChange{false};
+  bool isReceive{false};
+  Amount userAmount{0};
+
+  TxOutput() = default;
+  TxOutput(const std::string& address, Amount amount)
+      : address(address), amount(amount) {}
+
+  bool operator==(const TxOutput& other) const {
+    return address == other.address && amount == other.amount &&
+           isChange == other.isChange && isReceive == other.isReceive &&
+           userAmount == other.userAmount;
+  }
+  bool operator!=(const TxOutput& other) const { return !(*this == other); }
+};
 typedef std::map<std::string, bool> RequestTokens;  // token-sent map
 typedef std::vector<size_t> ScriptNodeId;
 typedef std::vector<ScriptNodeId> SigningPath;
@@ -1136,9 +1153,7 @@ class Transaction {
   int get_height() const;
   std::vector<TxInput> const& get_inputs() const;
   std::vector<TxOutput> const& get_outputs() const;
-  std::vector<TxOutput> const& get_user_outputs() const;
-  std::vector<TxOutput> const& get_receive_outputs() const;
-  int get_change_index() const;
+  std::vector<TxOutput>& mutable_outputs();
   int get_m() const;
   AddressType get_address_type() const;
   WalletType get_wallet_type() const;
@@ -1166,9 +1181,6 @@ class Transaction {
   void set_height(int value);
   void add_input(const TxInput& value);
   void add_output(const TxOutput& value);
-  void add_user_output(const TxOutput& value);
-  void add_receive_output(const TxOutput& value);
-  void set_change_index(int value);
   void set_m(int value);
   void set_wallet_type(WalletType value);
   void set_address_type(AddressType value);
@@ -1197,9 +1209,6 @@ class Transaction {
   int height_;
   std::vector<TxInput> inputs_;
   std::vector<TxOutput> outputs_;
-  std::vector<TxOutput> user_outputs_;
-  std::vector<TxOutput> receive_output_;
-  int change_index_;
   int m_;
   WalletType wallet_type_;
   AddressType address_type_;
