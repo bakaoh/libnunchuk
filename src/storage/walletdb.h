@@ -81,11 +81,13 @@ class NunchukWalletDb : public NunchukDb {
   std::vector<Transaction> GetTransactions(int count = 1000, int skip = 0);
   bool SetUtxos(const std::string &address, const std::string &utxo);
   Amount GetBalance(bool include_mempool);
+  std::map<AssetId, Amount> GetAssetBalances();
   std::string FillPsbt(const std::string &psbt);
   void FillSendReceiveData(Transaction &tx);
   void FillExtra(const std::string &extra, Transaction &tx) const;
   std::pair<int, bool> GetAddressIndex(const std::string &address);
   Amount GetAddressBalance(const std::string &address);
+  std::map<AssetId, Amount> GetAddressAssets(const std::string &address);
   bool MarkAddressAsUsed(const std::string &address);
   std::string GetAddressStatus(const std::string &address) const;
   void ForceRefresh();
