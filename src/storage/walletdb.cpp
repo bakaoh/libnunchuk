@@ -38,6 +38,8 @@
 #include <base58.h>
 #include <util/strencodings.h>
 #include <util/bip32.h>
+#include <liquid/wallysigner.hpp>
+#include <liquid/wallyutils.hpp>
 
 using json = nlohmann::json;
 namespace ba = boost::algorithm;
@@ -261,7 +263,10 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   if (!skip_balance) {
     wallet.set_balance(GetBalance(false));
     wallet.set_unconfirmed_balance(GetBalance(true));
-    // TODO: liquid balance
+    auto asset_balances = GetAssetBalances();
+    for (auto&& asset_balance : asset_balances) {
+      wallet.set_asset_balance(asset_balance.first, asset_balance.second);
+    }
   }
   if (!txs_cache_.count(db_file_name_)) txs_cache_[db_file_name_] = {};
   return wallet;
@@ -515,7 +520,9 @@ std::pair<int, bool> NunchukWalletDb::GetAddressIndex(
 }
 
 Amount NunchukWalletDb::GetAddressBalance(const std::string& address) {
-  // TODO: liquid balance
+  if (IsSupportLiquid()) {
+    return 0;
+  }
   auto coins = GetCoins();
   Amount balance = 0;
   for (auto&& coin : coins) {
@@ -527,6 +534,24 @@ Amount NunchukWalletDb::GetAddressBalance(const std::string& address) {
     balance += coin.get_amount();
   }
   return balance;
+}
+
+std::map<AssetId, Amount> NunchukWalletDb::GetAddressAssets(const std::string& address) {
+  if (!IsSupportLiquid()) {
+    return {};
+  }
+  std::vector<std::string> txs{}; // TODO: get txs from database
+  std::map<AssetId, Amount> asset_balances{};
+  for (auto&& tx : txs) {
+    auto utxos = wally_signer_->GetUtxosFromTx(tx, address);
+    for (size_t i = 0; i < utxos.values_in.size(); i++) {
+      AssetId asset_id(utxos.asset_ids_in.begin() + i * 32,
+                       utxos.asset_ids_in.begin() + i * 32 + 32);
+      Amount amount(utxos.values_in[i]);
+      asset_balances[asset_id] += amount;
+    }
+  }
+  return asset_balances;
 }
 
 bool NunchukWalletDb::MarkAddressAsUsed(const std::string& address) {
@@ -1056,6 +1081,25 @@ Amount NunchukWalletDb::GetBalance(bool include_mempool) {
     balance += coin.get_amount();
   }
   return balance;
+}
+
+std::map<AssetId, Amount> NunchukWalletDb::GetAssetBalances() {
+  if (!IsSupportLiquid()) {
+    return {};
+  }
+  std::vector<std::string> txs{};  // TODO: get txs from database
+  std::map<AssetId, Amount> asset_balances{};
+  for (auto&& tx : txs) {
+    auto utxos = wally_signer_->GetUtxosFromTx(tx);
+    for (size_t i = 0; i < utxos.values_in.size(); i++) {
+      AssetId asset_id(utxos.asset_ids_in.begin() + i * 32,
+                       utxos.asset_ids_in.begin() + i * 32 + 32);
+      Amount amount(utxos.values_in[i]);
+      asset_balances[asset_id] += amount;
+    }
+  }
+
+  return asset_balances;
 }
 
 std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {

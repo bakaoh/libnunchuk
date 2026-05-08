@@ -179,7 +179,8 @@ class WallySigner {
     return {signing_priv_key, signing_pub_key};
   }
 
-  LiquidUtxos GetUtxosFromTx(const std::string& txHex) {
+  LiquidUtxos GetUtxosFromTx(const std::string& txHex,
+                             const std::string& address = {}) {
     LiquidUtxos out;
     struct wally_tx* tx{nullptr};
     CHECK_WALLY(wally_tx_from_hex(txHex.c_str(), tx_flags_, &tx));
@@ -195,6 +196,7 @@ class WallySigner {
       std::vector<unsigned char> script(txout.script,
                                         txout.script + txout.script_len);
       if (!spk_.contains(script)) continue;
+      if (!address.empty() && spk_[script].address != address) continue;
       auto privateBlindingKey = GetBlindingKey(script);
 
       std::vector<unsigned char> nonce(txout.nonce,

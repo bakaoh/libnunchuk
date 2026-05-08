@@ -206,10 +206,14 @@ class NunchukStorage {
                           const std::string &derivation_path);
   bool UpdateRemoteSigner(Chain chain, const SingleSigner &remotesigner);
   bool IsMasterSigner(Chain chain, const std::string &id);
-  std::pair<int, bool> GetAddressIndex(Chain chain, const std::string &wallet_id,
-                      const std::string &address);
+  std::pair<int, bool> GetAddressIndex(Chain chain,
+                                       const std::string &wallet_id,
+                                       const std::string &address);
   Amount GetAddressBalance(Chain chain, const std::string &wallet_id,
                            const std::string &address);
+  std::map<AssetId, Amount> GetAddressAssets(Chain chain,
+                                             const std::string &wallet_id,
+                                             const std::string &address);
   bool MarkAddressAsUsed(Chain chain, const std::string &wallet_id,
                          const std::string &address);
   std::string GetAddressStatus(Chain chain, const std::string &wallet_id,
@@ -358,7 +362,8 @@ class NunchukStorage {
 
   NunchukWalletDb GetWalletDb(Chain chain, const std::string &id);
   // Return WalletDb with WallySigner injected if WalletType is LIQUID
-  NunchukWalletDb GetLiquidSupportedWalletDb(Chain chain, const std::string &id);
+  NunchukWalletDb GetLiquidSupportedWalletDb(Chain chain,
+                                             const std::string &id);
   NunchukSignerDb GetSignerDb(Chain chain, const std::string &id);
   NunchukAppStateDb GetAppStateDb(Chain chain);
   NunchukPrimaryDb GetPrimaryDb(Chain chain);
