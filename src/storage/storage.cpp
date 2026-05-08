@@ -1590,6 +1590,12 @@ Amount NunchukStorage::GetAddressBalance(Chain chain,
   return GetWalletDb(chain, wallet_id).GetAddressBalance(address);
 }
 
+std::map<AssetId, Amount> NunchukStorage::GetAddressAssets(
+    Chain chain, const std::string& wallet_id, const std::string& address) {
+  std::shared_lock<std::shared_mutex> lock(access_);
+  return GetWalletDb(chain, wallet_id).GetAddressAssets(address);
+}
+
 bool NunchukStorage::MarkAddressAsUsed(Chain chain,
                                        const std::string& wallet_id,
                                        const std::string& address) {
@@ -1679,7 +1685,8 @@ std::string NunchukStorage::ExportBackup() {
           json outputs = json::array();
           for (const auto& o : tx.get_outputs()) {
             if (o.userAmount != 0) {
-              outputs.push_back({{"address", o.address}, {"amount", o.userAmount}});
+              outputs.push_back(
+                  {{"address", o.address}, {"amount", o.userAmount}});
             }
           }
           int change_pos = -1;

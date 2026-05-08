@@ -1633,9 +1633,9 @@ Transaction NunchukImpl::DraftTransaction(
 
     if (m_outputs.empty()) {
       const auto& origin_outputs = origin_tx.get_outputs();
-      const bool has_user_amount = std::any_of(
-          origin_outputs.begin(), origin_outputs.end(),
-          [](const TxOutput& o) { return o.userAmount != 0; });
+      const bool has_user_amount =
+          std::any_of(origin_outputs.begin(), origin_outputs.end(),
+                      [](const TxOutput& o) { return o.userAmount != 0; });
       if (!has_user_amount) {
         subtract_fee_from_amount = false;
         for (const auto& output : origin_outputs) {
@@ -3314,8 +3314,7 @@ Wallet NunchukImpl::CreateLiquidWallet(const SingleSigner& signer) {
 
 std::map<AssetId, Amount> NunchukImpl::GetAddressAssets(
     const std::string& wallet_id, const std::string& address) {
-  // return Wallet::GetAddressAssets(wallet_id, address);
-  return std::map<AssetId, Amount>{};
+  return storage_->GetAddressAssets(chain_, wallet_id, address);
 }
 
 std::unique_ptr<Nunchuk> MakeNunchuk(const AppSettings& appsettings,
