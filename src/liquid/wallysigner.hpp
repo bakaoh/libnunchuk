@@ -62,6 +62,119 @@ class WallySigner {
   std::map<std::vector<unsigned char>, AddressDetail> spk_;
   uint32_t tx_flags_ = WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
 
+  using PrevoutSpendData =
+      std::pair<std::vector<unsigned char>, std::vector<unsigned char>>;
+
+  static std::string MakePrevoutMapKey(const unsigned char* txid,
+                                       uint32_t vout) {
+    std::string k(reinterpret_cast<const char*>(txid), WALLY_TXHASH_LEN);
+    k.push_back(static_cast<char>(vout & 0xff));
+    k.push_back(static_cast<char>((vout >> 8) & 0xff));
+    k.push_back(static_cast<char>((vout >> 16) & 0xff));
+    k.push_back(static_cast<char>((vout >> 24) & 0xff));
+    return k;
+  }
+
+  static std::map<std::string, PrevoutSpendData> BuildPrevoutSpendDataMap(
+      const std::vector<LiquidUtxos>& inputs) {
+    std::map<std::string, PrevoutSpendData> m;
+    for (const auto& u : inputs) {
+      if (u.tx_id.size() != WALLY_TXHASH_LEN) {
+        throw std::runtime_error(
+            "LiquidUtxos.tx_id must be WALLY_TXHASH_LEN (32) bytes");
+      }
+      const size_t n = u.vouts_in.size();
+      if (u.script_pubkeys_in.size() != n ||
+          u.value_commitments_in.size() != n) {
+        throw std::runtime_error(
+            "LiquidUtxos script_pubkeys_in/value_commitments_in must match "
+            "vouts_in length");
+      }
+      for (size_t k = 0; k < n; ++k) {
+        std::string key = MakePrevoutMapKey(u.tx_id.data(), u.vouts_in[k]);
+        PrevoutSpendData val{u.script_pubkeys_in[k], u.value_commitments_in[k]};
+        auto [it, inserted] = m.emplace(key, std::move(val));
+        if (!inserted) {
+          if (it->second.first != u.script_pubkeys_in[k] ||
+              it->second.second != u.value_commitments_in[k]) {
+            throw std::runtime_error(
+                "Conflicting LiquidUtxos entries for the same prevout");
+          }
+        }
+      }
+    }
+    return m;
+  }
+
+  void SignTxInPlace(
+      struct wally_tx* tx,
+      const std::vector<std::vector<unsigned char>>& script_pubkeys_in,
+      const std::vector<std::vector<unsigned char>>& value_commitments_in) {
+    if (tx == nullptr) throw std::runtime_error("SignTxInPlace: tx is null");
+
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+
+    if (script_pubkeys_in.size() != num_inputs ||
+        value_commitments_in.size() != num_inputs) {
+      throw std::runtime_error(
+          "SignTxInPlace: script_pubkeys_in/value_commitments_in size mismatch "
+          "with tx inputs");
+    }
+
+    for (size_t vin = 0; vin < num_inputs; vin++) {
+      const auto& utxo_script = script_pubkeys_in[vin];
+      if (!spk_.contains(utxo_script)) {
+        throw std::runtime_error("Signing key not found");
+      }
+      uint32_t index = spk_[utxo_script].index;
+      const auto& [signingPrivKey, signingPubKey] = GetSigningKey(index);
+      std::vector<unsigned char> pubkeyhash(HASH160_LEN);
+      CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
+                                pubkeyhash.data(), pubkeyhash.size()));
+
+      std::vector<unsigned char> script_code(256);
+      size_t script_code_len = 0;
+      CHECK_WALLY(wally_scriptpubkey_p2pkh_from_bytes(
+          pubkeyhash.data(), pubkeyhash.size(), 0, script_code.data(),
+          script_code.size(), &script_code_len));
+      script_code.resize(script_code_len);
+
+      std::vector<unsigned char> sighash(SHA256_LEN);
+      const auto& prevout_value = value_commitments_in[vin];  // 33 bytes
+      CHECK_WALLY(wally_tx_get_elements_signature_hash(
+          tx, vin, script_code.data(), script_code.size(), prevout_value.data(),
+          prevout_value.size(), WALLY_SIGHASH_ALL, WALLY_TX_FLAG_USE_WITNESS,
+          sighash.data(), sighash.size()));
+
+      std::vector<unsigned char> sig64(EC_SIGNATURE_LEN);
+      CHECK_WALLY(wally_ec_sig_from_bytes(
+          signingPrivKey.data(), signingPrivKey.size(), sighash.data(),
+          sighash.size(), EC_FLAG_ECDSA, sig64.data(), sig64.size()));
+
+      CHECK_WALLY(wally_ec_sig_verify(
+          signingPubKey.data(), signingPubKey.size(), sighash.data(),
+          sighash.size(), EC_FLAG_ECDSA, sig64.data(), sig64.size()));
+
+      size_t sig_der_len = 0;
+      std::vector<unsigned char> sig_der(EC_SIGNATURE_DER_MAX_LEN);
+      CHECK_WALLY(wally_ec_sig_to_der(sig64.data(), sig64.size(),
+                                      sig_der.data(), sig_der.size(),
+                                      &sig_der_len));
+      sig_der.resize(sig_der_len);
+      sig_der.push_back(static_cast<unsigned char>(WALLY_SIGHASH_ALL));
+
+      struct wally_tx_witness_stack* wit = nullptr;
+      CHECK_WALLY(wally_tx_witness_stack_init_alloc(2, &wit));
+      CHECK_WALLY(
+          wally_tx_witness_stack_add(wit, sig_der.data(), sig_der.size()));
+      CHECK_WALLY(wally_tx_witness_stack_add(wit, signingPubKey.data(),
+                                             signingPubKey.size()));
+      CHECK_WALLY(wally_tx_set_input_witness(tx, vin, wit));
+      wally_tx_witness_stack_free(wit);
+    }
+  }
+
  public:
   WallySigner(const std::string& mnemonic, const std::string& passphrase) {
     std::vector<unsigned char> seed(BIP39_SEED_LEN_512);
@@ -117,7 +230,7 @@ class WallySigner {
       throw NunchukException(NunchukException::INVALID_PARAMETER,
                              "Invalid hd keypath");
     }
-    keypath.push_back(is_change ? 1 : 0);
+    // keypath.push_back(is_change ? 1 : 0);
     keypath.push_back(start_index);
     std::vector<AddressDetail> rs{};
     for (uint32_t index = start_index; index < end_index; index++) {
@@ -205,6 +318,7 @@ class WallySigner {
     rs.set_height(height);
     rs.set_lock_time(tx->locktime);
     rs.set_raw(txHex);
+    bool all_signed = true;
     for (size_t vin = 0; vin < tx->num_inputs; vin++) {
       const auto& txin = tx->inputs[vin];
       std::vector<unsigned char> vin_txid(txin.txhash,
@@ -213,6 +327,9 @@ class WallySigner {
       std::string vin_txid_str =
           WallyUtils::HexFromBytes(vin_txid.data(), vin_txid.size());
       rs.add_input({vin_txid_str, txin.index, txin.sequence});
+      size_t items = 0;
+      CHECK_WALLY(wally_tx_get_input_witness_num_items(tx, vin, &items));
+      if (items == 0) all_signed = false;
     }
     for (size_t vout = 0; vout < tx->num_outputs; vout++) {
       const auto& txout = tx->outputs[vout];
@@ -283,7 +400,8 @@ class WallySigner {
     } else if (height == -2) {
       rs.set_status(TransactionStatus::NETWORK_REJECTED);
     } else if (height == -1) {
-      rs.set_status(TransactionStatus::READY_TO_BROADCAST);
+      rs.set_status(all_signed ? TransactionStatus::READY_TO_BROADCAST
+                               : TransactionStatus::PENDING_SIGNATURES);
     } else if (height > 0) {
       rs.set_status(TransactionStatus::CONFIRMED);
     }
@@ -389,6 +507,41 @@ class WallySigner {
     return out;
   }
 
+  // Returns true iff every input of `tx_hex` has a non-empty witness stack.
+  //
+  // CreateTx leaves the witness empty on all inputs; SignTx fills the witness
+  // (sig + pubkey for P2WPKH) on all of them. So "all witnesses non-empty"
+  // is a reliable signal that the tx has been signed by this signer flow.
+  //
+  // Note: this only checks witness presence, not signature validity. It also
+  // assumes a witness-based script type (P2WPKH/P2WSH). A legacy P2PKH input
+  // would put its signature in scriptSig, which this check does not consider.
+  bool IsTxSigned(const std::string& tx_hex) {
+    struct wally_tx* tx = nullptr;
+    CHECK_WALLY(wally_tx_from_hex(tx_hex.c_str(), tx_flags_, &tx));
+
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+    if (num_inputs == 0) {
+      wally_tx_free(tx);
+      return false;
+    }
+
+    bool all_signed = true;
+    for (size_t vin = 0; vin < num_inputs; ++vin) {
+      size_t items = 0;
+      CHECK_WALLY(wally_tx_get_input_witness_num_items(tx, vin, &items));
+      if (items == 0) {
+        all_signed = false;
+        break;
+      }
+    }
+    wally_tx_free(tx);
+    return all_signed;
+  }
+
+  // Build and blind a Liquid transaction; returns unsigned hex (no witness
+  // signatures). Use SignTx(hex, inputs) when ready to sign.
   std::string CreateTx(
       const std::vector<LiquidUtxos>& inputs,
       const std::vector<std::string>& destinationConfAddrs,
@@ -628,18 +781,12 @@ class WallySigner {
 
     std::vector<std::vector<unsigned char>> combined_input_prev_txid_for_vin;
     std::vector<uint32_t> combined_vouts_in;
-    std::vector<std::vector<unsigned char>> combined_script_pubkeys_in;
-    std::vector<std::vector<unsigned char>> combined_value_commitments_in;
     combined_input_prev_txid_for_vin.reserve(num_inputs_combined);
     combined_vouts_in.reserve(num_inputs_combined);
-    combined_script_pubkeys_in.reserve(num_inputs_combined);
-    combined_value_commitments_in.reserve(num_inputs_combined);
 
     for (auto idx : inputIdxCombined) {
       combined_input_prev_txid_for_vin.push_back(input_prev_txid_for_vin[idx]);
       combined_vouts_in.push_back(vouts_in[idx]);
-      combined_script_pubkeys_in.push_back(script_pubkeys_in[idx]);
-      combined_value_commitments_in.push_back(value_commitments_in[idx]);
     }
 
     std::vector<unsigned char> combined_asset_ids_in_for_surj;
@@ -826,68 +973,67 @@ class WallySigner {
           0));      // flags
     }
 
-    // Sign P2WPKH (all inputs)
-    for (size_t vin = 0; vin < num_inputs_combined; vin++) {
-      const auto& utxo_script = combined_script_pubkeys_in[vin];
-      if (!spk_.contains(utxo_script)) {
-        throw std::runtime_error("Signing key not found");
-      }
-      uint32_t index = spk_[utxo_script].index;
-      const auto& [signingPrivKey, signingPubKey] = GetSigningKey(index);
-      std::vector<unsigned char> pubkeyhash(HASH160_LEN);
-      CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
-                                pubkeyhash.data(), pubkeyhash.size()));
-
-      std::vector<unsigned char> script_code(256);
-      size_t script_code_len = 0;
-      CHECK_WALLY(wally_scriptpubkey_p2pkh_from_bytes(
-          pubkeyhash.data(), pubkeyhash.size(), 0, script_code.data(),
-          script_code.size(), &script_code_len));
-      script_code.resize(script_code_len);
-
-      std::vector<unsigned char> sighash(SHA256_LEN);
-      const auto& prevout_value =
-          combined_value_commitments_in[vin];  // 33 bytes
-      CHECK_WALLY(wally_tx_get_elements_signature_hash(
-          output_tx, vin, script_code.data(), script_code.size(),
-          prevout_value.data(), prevout_value.size(), WALLY_SIGHASH_ALL,
-          WALLY_TX_FLAG_USE_WITNESS, sighash.data(), sighash.size()));
-
-      std::vector<unsigned char> sig64(EC_SIGNATURE_LEN);
-      CHECK_WALLY(wally_ec_sig_from_bytes(
-          signingPrivKey.data(), signingPrivKey.size(), sighash.data(),
-          sighash.size(), EC_FLAG_ECDSA, sig64.data(), sig64.size()));
-
-      CHECK_WALLY(wally_ec_sig_verify(
-          signingPubKey.data(), signingPubKey.size(), sighash.data(),
-          sighash.size(), EC_FLAG_ECDSA, sig64.data(), sig64.size()));
-
-      // Convert to DER and append hash type
-      size_t sig_der_len = 0;
-      std::vector<unsigned char> sig_der(EC_SIGNATURE_DER_MAX_LEN);
-      CHECK_WALLY(wally_ec_sig_to_der(sig64.data(), sig64.size(),
-                                      sig_der.data(), sig_der.size(),
-                                      &sig_der_len));
-      sig_der.resize(sig_der_len);
-      sig_der.push_back(static_cast<unsigned char>(WALLY_SIGHASH_ALL));
-
-      struct wally_tx_witness_stack* wit = nullptr;
-      CHECK_WALLY(wally_tx_witness_stack_init_alloc(2, &wit));
-      CHECK_WALLY(
-          wally_tx_witness_stack_add(wit, sig_der.data(), sig_der.size()));
-      CHECK_WALLY(wally_tx_witness_stack_add(wit, signingPubKey.data(),
-                                             signingPubKey.size()));
-      CHECK_WALLY(wally_tx_set_input_witness(output_tx, vin, wit));
-      wally_tx_witness_stack_free(wit);
-    }
-
-    // Serialize
+    // Serialize unsigned tx (witness stacks empty). Call SignTx(hex, inputs)
+    // later to produce a broadcast-ready transaction.
     char* txhex = nullptr;
     CHECK_WALLY(wally_tx_to_hex(output_tx, tx_flags_, &txhex));
     std::string txHexOut(txhex);
     wally_free_string(txhex);
     wally_tx_free(output_tx);
     return txHexOut;
+  }
+
+  // Signs an unsigned Liquid hex transaction produced by CreateTx.
+  //
+  // Elements confidential sighash requires each input's previous confidential
+  // value commitment; that data is not present in the spending tx hex, so we
+  // rebuild script_pubkey + value_commitment by matching each vin's (txid,
+  // vout) against `inputs` (the same LiquidUtxos vector passed to CreateTx).
+  std::string SignTx(const std::string& tx_hex,
+                     const std::vector<LiquidUtxos>& inputs) {
+    std::map<std::string, PrevoutSpendData> prevouts =
+        BuildPrevoutSpendDataMap(inputs);
+
+    struct wally_tx* tx = nullptr;
+    CHECK_WALLY(wally_tx_from_hex(tx_hex.c_str(), tx_flags_, &tx));
+
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+
+    std::vector<std::vector<unsigned char>> script_pubkeys_in;
+    std::vector<std::vector<unsigned char>> value_commitments_in;
+    script_pubkeys_in.reserve(num_inputs);
+    value_commitments_in.reserve(num_inputs);
+
+    for (size_t vin = 0; vin < num_inputs; ++vin) {
+      std::vector<unsigned char> txhash(WALLY_TXHASH_LEN);
+      CHECK_WALLY(
+          wally_tx_get_input_txhash(tx, vin, txhash.data(), txhash.size()));
+      size_t vout_index = 0;
+      CHECK_WALLY(wally_tx_get_input_index(tx, vin, &vout_index));
+      const auto vout_u32 = static_cast<uint32_t>(vout_index);
+
+      const std::string key = MakePrevoutMapKey(txhash.data(), vout_u32);
+      auto it = prevouts.find(key);
+      if (it == prevouts.end()) {
+        wally_tx_free(tx);
+        throw std::runtime_error(
+            "SignTx: no LiquidUtxos match for input vin=" +
+            std::to_string(vin) +
+            " (need same UTXO set used when building the unsigned tx)");
+      }
+      script_pubkeys_in.push_back(it->second.first);
+      value_commitments_in.push_back(it->second.second);
+    }
+
+    SignTxInPlace(tx, script_pubkeys_in, value_commitments_in);
+
+    char* out_hex = nullptr;
+    CHECK_WALLY(wally_tx_to_hex(tx, tx_flags_, &out_hex));
+    std::string signed_hex(out_hex);
+    wally_free_string(out_hex);
+    wally_tx_free(tx);
+    return signed_hex;
   }
 };
 }  // namespace nunchuk::wally

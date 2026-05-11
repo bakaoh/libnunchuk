@@ -1197,7 +1197,18 @@ std::vector<std::string> NunchukWalletDb::GetVtxValues() {
 Transaction NunchukWalletDb::GetTransactionFromVtxValue(
     const std::string& value, const nunchuk::Wallet& wallet, int height) {
   if (wallet.get_wallet_type() == WalletType::LIQUID) {
-    return wally_signer_->GetTransactionFromTx(value, height);
+    auto tx = wally_signer_->GetTransactionFromTx(value, height);
+    SingleSigner signer = wallet.get_signers()[0];
+    if (tx.get_status() == TransactionStatus::PENDING_CONFIRMATION ||
+        tx.get_status() == TransactionStatus::READY_TO_BROADCAST ||
+        tx.get_status() == TransactionStatus::CONFIRMED) {
+      tx.set_signed({signer});
+      tx.set_signer(signer.get_master_fingerprint(), true);
+    } else {
+      tx.set_signed({});
+      tx.set_signer(signer.get_master_fingerprint(), false);
+    }
+    return tx;
   }
   auto [tx, is_hex_tx] = GetTransactionFromStr(value, wallet, height);
   if (is_hex_tx) {
@@ -1316,7 +1327,9 @@ void NunchukWalletDb::FillExtra(const std::string& extra,
 
 // TODO (bakaoh): consider persisting these data
 void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
-  // TODO: liquid fill send receive data
+  if (IsSupportLiquid()) {
+    return;
+  }
   auto allAddr = GetAllAddressData();
   auto isMyAddress = [&](const std::string& address) {
     return allAddr.count(address);
