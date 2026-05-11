@@ -536,18 +536,32 @@ Amount NunchukWalletDb::GetAddressBalance(const std::string& address) {
   return balance;
 }
 
-std::map<AssetId, Amount> NunchukWalletDb::GetAddressAssets(const std::string& address) {
+std::map<AssetId, Amount> NunchukWalletDb::GetAddressAssets(
+    const std::string& address) {
   if (!IsSupportLiquid()) {
     return {};
   }
-  std::vector<std::string> txs{}; // TODO: get txs from database
-  std::map<AssetId, Amount> asset_balances{};
+
+  std::vector<std::string> txs = GetVtxValues();
+  std::vector<wally::LiquidUtxos> utxos{};
   for (auto&& tx : txs) {
-    auto utxos = wally_signer_->GetUtxosFromTx(tx, address);
-    for (size_t i = 0; i < utxos.values_in.size(); i++) {
-      AssetId asset_id(utxos.asset_ids_in.begin() + i * 32,
-                       utxos.asset_ids_in.begin() + i * 32 + 32);
-      Amount amount(utxos.values_in[i]);
+    utxos.push_back(wally_signer_->GetUtxosFromTx(tx, address));
+  }
+
+  std::set<std::pair<std::vector<unsigned char>, uint32_t>> spent_utxos;
+  for (auto&& utxo : utxos) {
+    for (size_t i = 0; i < utxo.vouts_in.size(); i++) {
+      spent_utxos.insert({utxo.vins_tx_id[i], utxo.vins_vout[i]});
+    }
+  }
+
+  std::map<AssetId, Amount> asset_balances{};
+  for (auto&& utxo : utxos) {
+    for (size_t i = 0; i < utxo.values_in.size(); i++) {
+      if (spent_utxos.count({utxo.tx_id, utxo.vouts_in[i]})) continue;
+      AssetId asset_id(utxo.asset_ids_in.begin() + i * 32,
+                       utxo.asset_ids_in.begin() + i * 32 + 32);
+      Amount amount(utxo.values_in[i]);
       asset_balances[asset_id] += amount;
     }
   }
@@ -1084,22 +1098,7 @@ Amount NunchukWalletDb::GetBalance(bool include_mempool) {
 }
 
 std::map<AssetId, Amount> NunchukWalletDb::GetAssetBalances() {
-  if (!IsSupportLiquid()) {
-    return {};
-  }
-  std::vector<std::string> txs{};  // TODO: get txs from database
-  std::map<AssetId, Amount> asset_balances{};
-  for (auto&& tx : txs) {
-    auto utxos = wally_signer_->GetUtxosFromTx(tx);
-    for (size_t i = 0; i < utxos.values_in.size(); i++) {
-      AssetId asset_id(utxos.asset_ids_in.begin() + i * 32,
-                       utxos.asset_ids_in.begin() + i * 32 + 32);
-      Amount amount(utxos.values_in[i]);
-      asset_balances[asset_id] += amount;
-    }
-  }
-
-  return asset_balances;
+  return GetAddressAssets({});
 }
 
 std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
@@ -1164,6 +1163,23 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
       UpdateTransactionMemo(tx.get_txid(), tx.get_memo());
     }
   }
+  return rs;
+}
+
+std::vector<std::string> NunchukWalletDb::GetVtxValues() {
+  sqlite3_stmt* stmt;
+  std::string sql =
+      std::string("SELECT * FROM ") + TxTable() + " WHERE HEIGHT > -1;";
+  sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, NULL);
+  sqlite3_step(stmt);
+
+  std::vector<std::string> rs;
+  while (sqlite3_column_text(stmt, 0)) {
+    std::string value = std::string((char*)sqlite3_column_text(stmt, 1));
+    rs.push_back(value);
+    sqlite3_step(stmt);
+  }
+  SQLCHECK(sqlite3_finalize(stmt));
   return rs;
 }
 
