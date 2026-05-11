@@ -753,7 +753,17 @@ class NunchukImpl : public Nunchuk {
   Wallet CreateLiquidWallet(const SingleSigner& signer) override;
   std::map<AssetId, Amount> GetAddressAssets(
       const std::string& wallet_id, const std::string& address) override;
-
+  Transaction CreateLiquidTransaction(
+      const std::string& wallet_id,
+      const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+      Amount fee_rate = -1, const std::string& memo = {}) override;
+  Transaction DraftLiquidTransaction(
+      const std::string& wallet_id,
+      const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+      Amount fee_rate = -1) override;
+  Transaction SignLiquidTransaction(const std::string& wallet_id,
+                                    const std::string& tx_id,
+                                    const Device& device) override;
   void AddGroupUpdateListener(
       std::function<void(const GroupSandbox& state)> listener) override;
   void AddGroupMessageListener(

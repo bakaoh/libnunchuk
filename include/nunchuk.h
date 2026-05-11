@@ -2055,7 +2055,17 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual Wallet CreateLiquidWallet(const SingleSigner& signer) = 0;
   virtual std::map<AssetId, Amount> GetAddressAssets(
       const std::string& wallet_id, const std::string& address) = 0;
-
+  virtual Transaction CreateLiquidTransaction(
+      const std::string& wallet_id,
+      const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+      Amount fee_rate = -1, const std::string& memo = {}) = 0;
+  virtual Transaction DraftLiquidTransaction(
+      const std::string& wallet_id,
+      const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+      Amount fee_rate = -1) = 0;
+  virtual Transaction SignLiquidTransaction(const std::string& wallet_id,
+                                            const std::string& tx_id,
+                                            const Device& device) = 0;
   // Add listener methods
   virtual void AddBalanceListener(
       std::function<void(std::string /* wallet_id */, Amount /* new_balance */)>

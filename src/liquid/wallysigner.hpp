@@ -540,368 +540,293 @@ class WallySigner {
     return all_signed;
   }
 
+  using AssetDestinations =
+      std::map<AssetId, std::map<std::string, Amount>>;
+
   // Build and blind a Liquid transaction; returns unsigned hex (no witness
   // signatures). Use SignTx(hex, inputs) when ready to sign.
-  std::string CreateTx(
-      const std::vector<LiquidUtxos>& inputs,
-      const std::vector<std::string>& destinationConfAddrs,
-      const std::string& feeChangeConfAddr,  // empty => no fee change output
-      const std::vector<unsigned char>& assetIdToSend, uint64_t feeSats) {
-    if (inputs.empty())
-      throw std::runtime_error("prevTxHexes must be non-empty");
-    if (destinationConfAddrs.empty())
-      throw std::runtime_error("destinationConfAddrs must be non-empty");
+  //
+  // - `destinations`: per-asset map of confidential-address -> amount.
+  //   Multiple assets and multiple recipients per asset are supported.
+  // - `changeConfAddr`: receives leftover for every asset (including LBTC fee
+  //   change). Required whenever any asset has a non-zero remainder.
+  // - `feeSats`: explicit LBTC fee. LBTC inputs must cover feeSats plus any
+  //   LBTC destinations.
+  //
+  // Layout of the resulting tx outputs:
+  //   vout 0          : explicit LBTC fee (unblinded)
+  //   then per asset  : recipient outputs (in `destinations` order),
+  //                     followed by a change output if leftover > 0.
+  std::string CreateTx(const std::vector<LiquidUtxos>& inputs,
+                       const AssetDestinations& destinations,
+                       const std::string& changeConfAddr, uint64_t feeSats) {
+    if (inputs.empty()) throw std::runtime_error("inputs must be non-empty");
+    if (destinations.empty())
+      throw std::runtime_error("destinations must be non-empty");
 
     const std::vector<unsigned char> ZERO32(32, 0);
+    const auto& LBTC = WallyUtils::C().LBTC_ASSET_ID;
 
-    // Merge
-    std::vector<unsigned char> asset_generators_in;
-    std::vector<unsigned char> asset_ids_in;
-    std::vector<uint64_t> values_in;
-    std::vector<unsigned char> abfs_in;
-    std::vector<unsigned char> vbfs_in;
-    std::vector<std::vector<unsigned char>> script_pubkeys_in;
-    std::vector<std::vector<unsigned char>> value_commitments_in;
-    std::vector<uint32_t> vouts_in;
-    std::vector<std::vector<unsigned char>> input_prev_txid_for_vin;
+    // Per-input view derived from inputs[].
+    struct InputInfo {
+      std::vector<unsigned char> tx_id;            // 32
+      uint32_t vout;
+      std::vector<unsigned char> asset_id;         // 32
+      std::vector<unsigned char> asset_gen;        // ASSET_GENERATOR_LEN (33)
+      uint64_t value;
+      std::vector<unsigned char> abf;              // 32
+      std::vector<unsigned char> vbf;              // 32
+    };
+    std::vector<InputInfo> all_inputs;
 
-    for (auto& u : inputs) {
-      asset_generators_in.insert(asset_generators_in.end(),
-                                 u.asset_generators_in.begin(),
-                                 u.asset_generators_in.end());
-      asset_ids_in.insert(asset_ids_in.end(), u.asset_ids_in.begin(),
-                          u.asset_ids_in.end());
-      values_in.insert(values_in.end(), u.values_in.begin(), u.values_in.end());
-      abfs_in.insert(abfs_in.end(), u.abfs_in.begin(), u.abfs_in.end());
-      vbfs_in.insert(vbfs_in.end(), u.vbfs_in.begin(), u.vbfs_in.end());
-      script_pubkeys_in.insert(script_pubkeys_in.end(),
-                               u.script_pubkeys_in.begin(),
-                               u.script_pubkeys_in.end());
-      value_commitments_in.insert(value_commitments_in.end(),
-                                  u.value_commitments_in.begin(),
-                                  u.value_commitments_in.end());
-      vouts_in.insert(vouts_in.end(), u.vouts_in.begin(), u.vouts_in.end());
-
-      // One tx_id per input
-      for (size_t k = 0; k < u.vouts_in.size(); k++)
-        input_prev_txid_for_vin.push_back(u.tx_id);
-    }
-
-    const size_t num_inputs = values_in.size();
-    if (num_inputs == 0)
-      throw std::runtime_error(
-          "No spendable outputs found in prev tx(s) for our script_pubkey");
-
-    // Determine which input indices are transfer-fee based on asset ids
-    const bool feeAssetSame = assetIdToSend == WallyUtils::C().LBTC_ASSET_ID;
-    std::vector<size_t> transferIdx;
-    std::vector<size_t> feeIdx;
-    transferIdx.reserve(num_inputs);
-    feeIdx.reserve(num_inputs);
-
-    for (size_t vin = 0; vin < num_inputs; vin++) {
-      const unsigned char* id = asset_ids_in.data() + vin * 32;
-      if (std::memcmp(id, assetIdToSend.data(), 32) == 0)
-        transferIdx.push_back(vin);
-      if (std::memcmp(id, WallyUtils::C().LBTC_ASSET_ID.data(), 32) == 0)
-        feeIdx.push_back(vin);
-    }
-
-    if (transferIdx.empty()) {
-      throw std::runtime_error("No inputs found for assetIdToSend");
-    }
-
-    if (feeAssetSame) {
-      feeIdx = transferIdx;
-    } else {
-      if (feeIdx.empty())
-        throw std::runtime_error("No inputs found for feeAssetId");
-    }
-
-    // Ensure there are no other assets besides transfer and fee assets
-    std::vector<char> used(num_inputs, 0);
-    for (auto i : transferIdx) used[i] = 1;
-    for (auto i : feeIdx) used[i] = 1;
-    for (size_t vin = 0; vin < num_inputs; vin++) {
-      if (!used[vin])
-        throw std::runtime_error(
-            "Mixed assets present beyond assetIdToSend/feeAssetId; this "
-            "example does not support it");
-    }
-
-    uint64_t transferTotalIn = 0;
-    uint64_t feeTotalIn = 0;
-    for (auto i : transferIdx) transferTotalIn += values_in[i];
-    for (auto i : feeIdx) feeTotalIn += values_in[i];
-
-    if (feeAssetSame) {
-      if (transferTotalIn <= feeSats)
-        throw std::runtime_error("Input amount is not enough to pay fee");
-    } else {
-      if (feeTotalIn < feeSats)
-        throw std::runtime_error("Fee inputs are not enough to pay feeSats");
-    }
-
-    // Split recipient outputs
-    const size_t n = destinationConfAddrs.size();
-    uint64_t remaining = 0;
-    if (feeAssetSame)
-      remaining = transferTotalIn - feeSats;
-    else
-      remaining = transferTotalIn;
-
-    std::vector<uint64_t> output_values;
-    output_values.reserve(n);
-    uint64_t perOut = remaining / static_cast<uint64_t>(n);
-    uint64_t sum = 0;
-    for (size_t i = 0; i + 1 < n; i++) {
-      output_values.push_back(perOut);
-      sum += perOut;
-    }
-    output_values.push_back(remaining - sum);
-
-    const uint64_t feeRemaining = (feeAssetSame ? 0 : (feeTotalIn - feeSats));
-
-    // fee change optional decomposition
-    const bool createFeeChange =
-        (!feeAssetSame && feeRemaining > 0 && !feeChangeConfAddr.empty());
-    if (!feeAssetSame && feeRemaining > 0 && feeChangeConfAddr.empty()) {
-      throw std::runtime_error(
-          "feeChangeConfAddr is required when feeRemaining > 0 and feeAsset != "
-          "assetIdToSend");
-    }
-
-    // Blinding factors for recipients:
-    std::vector<std::vector<unsigned char>> abfs_recipient(
-        n, std::vector<unsigned char>(32));
-    std::vector<std::vector<unsigned char>> vbfs_recipient_all(
-        n, std::vector<unsigned char>(32));
-
-    for (size_t i = 0; i < n; i++)
-      abfs_recipient[i] = WallyUtils::RandomBytes(32);
-    for (size_t i = 0; i + 1 < n; i++)
-      vbfs_recipient_all[i] = WallyUtils::RandomBytes(32);
-
-    // Build transfer arrays for asset_final_vbf
-    std::vector<uint64_t> transfer_values_in;
-    transfer_values_in.reserve(transferIdx.size());
-    std::vector<unsigned char> transfer_abfs_in;
-    std::vector<unsigned char> transfer_vbfs_in;
-    for (auto idx : transferIdx) {
-      transfer_values_in.push_back(values_in[idx]);
-      transfer_abfs_in.insert(transfer_abfs_in.end(),
-                              abfs_in.begin() + idx * 32,
-                              abfs_in.begin() + (idx + 1) * 32);
-      transfer_vbfs_in.insert(transfer_vbfs_in.end(),
-                              vbfs_in.begin() + idx * 32,
-                              vbfs_in.begin() + (idx + 1) * 32);
-    }
-
-    // Prepare asset_final_vbf for transfer recipients
-    std::vector<uint64_t> transfer_values_for_vbf = transfer_values_in;
-    if (feeAssetSame) transfer_values_for_vbf.push_back(feeSats);
-    transfer_values_for_vbf.insert(transfer_values_for_vbf.end(),
-                                   output_values.begin(), output_values.end());
-
-    std::vector<unsigned char> transfer_abfs_for_vbf = transfer_abfs_in;
-    std::vector<unsigned char> transfer_vbfs_for_vbf = transfer_vbfs_in;
-    if (feeAssetSame)
-      transfer_abfs_for_vbf.insert(transfer_abfs_for_vbf.end(), ZERO32.begin(),
-                                   ZERO32.end());
-    // recipients abfs
-    for (size_t i = 0; i < n; i++) {
-      transfer_abfs_for_vbf.insert(transfer_abfs_for_vbf.end(),
-                                   abfs_recipient[i].begin(),
-                                   abfs_recipient[i].end());
-    }
-    if (feeAssetSame)
-      transfer_vbfs_for_vbf.insert(transfer_vbfs_for_vbf.end(), ZERO32.begin(),
-                                   ZERO32.end());
-    // recipients vbf except last
-    for (size_t i = 0; i + 1 < n; i++) {
-      transfer_vbfs_for_vbf.insert(transfer_vbfs_for_vbf.end(),
-                                   vbfs_recipient_all[i].begin(),
-                                   vbfs_recipient_all[i].end());
-    }
-
-    std::vector<unsigned char> vbf_final(32, 0);
-    CHECK_WALLY(wally_asset_final_vbf(
-        transfer_values_for_vbf.data(), transfer_values_for_vbf.size(),
-        transferIdx.size(), transfer_abfs_for_vbf.data(),
-        transfer_abfs_for_vbf.size(), transfer_vbfs_for_vbf.data(),
-        transfer_vbfs_for_vbf.size(), vbf_final.data(), vbf_final.size()));
-    vbfs_recipient_all[n - 1] = vbf_final;
-
-    // Prepare fee change blinding factors if needed
-    std::vector<unsigned char> feeChange_abf(32, 0);
-    std::vector<unsigned char> feeChange_vbf(32, 0);
-    std::vector<unsigned char> fee_abfs_in;
-    std::vector<unsigned char> fee_vbfs_in;
-    std::vector<uint64_t> fee_values_in;
-
-    if (createFeeChange) {
-      for (auto idx : feeIdx) {
-        fee_values_in.push_back(values_in[idx]);
-        fee_abfs_in.insert(fee_abfs_in.end(), abfs_in.begin() + idx * 32,
-                           abfs_in.begin() + (idx + 1) * 32);
-        fee_vbfs_in.insert(fee_vbfs_in.end(), vbfs_in.begin() + idx * 32,
-                           vbfs_in.begin() + (idx + 1) * 32);
+    for (const auto& u : inputs) {
+      if (u.tx_id.size() != WALLY_TXHASH_LEN) {
+        throw std::runtime_error("LiquidUtxos.tx_id must be 32 bytes");
       }
-      feeChange_abf = WallyUtils::RandomBytes(32);
+      const size_t k_count = u.vouts_in.size();
+      if (u.asset_ids_in.size() != k_count * 32 ||
+          u.values_in.size() != k_count || u.abfs_in.size() != k_count * 32 ||
+          u.vbfs_in.size() != k_count * 32 ||
+          u.asset_generators_in.size() != k_count * ASSET_GENERATOR_LEN) {
+        throw std::runtime_error(
+            "LiquidUtxos blinding arrays size mismatch with vouts_in");
+      }
+      for (size_t k = 0; k < k_count; ++k) {
+        InputInfo ii;
+        ii.tx_id = u.tx_id;
+        ii.vout = u.vouts_in[k];
+        ii.asset_id.assign(u.asset_ids_in.begin() + k * 32,
+                           u.asset_ids_in.begin() + (k + 1) * 32);
+        ii.asset_gen.assign(
+            u.asset_generators_in.begin() + k * ASSET_GENERATOR_LEN,
+            u.asset_generators_in.begin() + (k + 1) * ASSET_GENERATOR_LEN);
+        ii.value = u.values_in[k];
+        ii.abf.assign(u.abfs_in.begin() + k * 32,
+                      u.abfs_in.begin() + (k + 1) * 32);
+        ii.vbf.assign(u.vbfs_in.begin() + k * 32,
+                      u.vbfs_in.begin() + (k + 1) * 32);
+        all_inputs.push_back(std::move(ii));
+      }
+    }
 
-      // feeChange_vbf equation: values = feeValuesIn + [feeSats, feeRemaining]
-      std::vector<uint64_t> fee_values_for_vbf = fee_values_in;
-      fee_values_for_vbf.push_back(feeSats);
-      fee_values_for_vbf.push_back(feeRemaining);
+    if (all_inputs.empty()) {
+      throw std::runtime_error("No spendable outputs found in LiquidUtxos");
+    }
 
-      std::vector<unsigned char> fee_abfs_for_vbf = fee_abfs_in;
-      fee_abfs_for_vbf.insert(fee_abfs_for_vbf.end(), ZERO32.begin(),
-                              ZERO32.end());  // explicit fee output abf=0
-      fee_abfs_for_vbf.insert(fee_abfs_for_vbf.end(), feeChange_abf.begin(),
-                              feeChange_abf.end());
+    // Group input indices by asset id.
+    std::map<AssetId, std::vector<size_t>> asset_input_idx;
+    for (size_t i = 0; i < all_inputs.size(); ++i) {
+      asset_input_idx[all_inputs[i].asset_id].push_back(i);
+    }
 
-      std::vector<unsigned char> fee_vbfs_for_vbf = fee_vbfs_in;
-      fee_vbfs_for_vbf.insert(fee_vbfs_for_vbf.end(), ZERO32.begin(),
-                              ZERO32.end());  // explicit fee output vbf=0
+    // Per-asset plan: totals, destinations, change.
+    struct AssetPlan {
+      uint64_t total_in = 0;
+      uint64_t total_dest = 0;
+      uint64_t fee_part = 0;  // feeSats only for LBTC, else 0
+      uint64_t change = 0;
+      bool has_change = false;
+      // (addr, amount) preserved in addr-sorted order from the input map.
+      std::vector<std::pair<std::string, uint64_t>> dests;
+    };
+    std::map<AssetId, AssetPlan> plans;
 
+    for (const auto& [asset, idxs] : asset_input_idx) {
+      AssetPlan p;
+      for (auto i : idxs) p.total_in += all_inputs[i].value;
+      plans.emplace(asset, std::move(p));
+    }
+
+    for (const auto& [asset, addr_amount] : destinations) {
+      if (asset.size() != 32) {
+        throw std::runtime_error("Asset id must be 32 bytes");
+      }
+      if (addr_amount.empty()) {
+        throw std::runtime_error("Empty destination map for an asset");
+      }
+      auto it = plans.find(asset);
+      if (it == plans.end()) {
+        throw std::runtime_error(
+            "No inputs found for one of the destination assets");
+      }
+      AssetPlan& p = it->second;
+      for (const auto& [addr, amt] : addr_amount) {
+        if (amt == 0) {
+          throw std::runtime_error("Destination amount must be > 0");
+        }
+        if (addr.empty()) {
+          throw std::runtime_error("Destination address must be non-empty");
+        }
+        p.total_dest += amt;
+        p.dests.emplace_back(addr, amt);
+      }
+    }
+
+    if (!plans.contains(LBTC)) {
+      throw std::runtime_error("No LBTC inputs available to pay fee");
+    }
+    plans[LBTC].fee_part = feeSats;
+
+    for (auto& [asset, p] : plans) {
+      const uint64_t out_total = p.total_dest + p.fee_part;
+      if (out_total > p.total_in) {
+        throw std::runtime_error(
+            "Insufficient inputs for an asset (destinations + fee exceed "
+            "inputs)");
+      }
+      p.change = p.total_in - out_total;
+      p.has_change = p.change > 0;
+      if (p.has_change && changeConfAddr.empty()) {
+        throw std::runtime_error(
+            "changeConfAddr is required: an asset has a non-zero remainder");
+      }
+      // Need at least one blinded output per asset to balance random input
+      // vbfs; the explicit fee output is unblinded so it doesn't count.
+      const bool has_blinded_out = !p.dests.empty() || p.has_change;
+      if (!has_blinded_out) {
+        throw std::runtime_error(
+            "Asset has confidential inputs but no blinded outputs to balance "
+            "(provide a destination or accept change for this asset)");
+      }
+    }
+
+    // Build the planned output list.
+    struct PlannedOutput {
+      AssetId asset_id;
+      uint64_t value;
+      std::string conf_addr;  // unused when explicit_fee
+      bool explicit_fee;
+      std::vector<unsigned char> abf;  // 32 (ZERO32 when explicit_fee)
+      std::vector<unsigned char> vbf;  // 32 (filled later for last per-asset)
+    };
+    std::vector<PlannedOutput> outs;
+
+    {
+      PlannedOutput fee_out;
+      fee_out.asset_id = LBTC;
+      fee_out.value = feeSats;
+      fee_out.explicit_fee = true;
+      fee_out.abf = ZERO32;
+      fee_out.vbf = ZERO32;
+      outs.push_back(std::move(fee_out));
+    }
+
+    for (const auto& [asset, p] : plans) {
+      for (const auto& [addr, amt] : p.dests) {
+        PlannedOutput o;
+        o.asset_id = asset;
+        o.value = amt;
+        o.conf_addr = addr;
+        o.explicit_fee = false;
+        o.abf = WallyUtils::RandomBytes(32);
+        o.vbf = WallyUtils::RandomBytes(32);
+        outs.push_back(std::move(o));
+      }
+      if (p.has_change) {
+        PlannedOutput o;
+        o.asset_id = asset;
+        o.value = p.change;
+        o.conf_addr = changeConfAddr;
+        o.explicit_fee = false;
+        o.abf = WallyUtils::RandomBytes(32);
+        o.vbf = WallyUtils::RandomBytes(32);
+        outs.push_back(std::move(o));
+      }
+    }
+
+    // For each asset, the last blinded output absorbs the residual vbf.
+    std::map<AssetId, std::vector<size_t>> asset_blinded_outs;
+    for (size_t i = 0; i < outs.size(); ++i) {
+      if (!outs[i].explicit_fee) {
+        asset_blinded_outs[outs[i].asset_id].push_back(i);
+      }
+    }
+
+    for (const auto& [asset, blinded_idxs] : asset_blinded_outs) {
+      const auto& input_idxs = asset_input_idx.at(asset);
+
+      std::vector<uint64_t> values;
+      std::vector<unsigned char> abfs;
+      std::vector<unsigned char> vbfs;
+      for (auto i : input_idxs) {
+        values.push_back(all_inputs[i].value);
+        abfs.insert(abfs.end(), all_inputs[i].abf.begin(),
+                    all_inputs[i].abf.end());
+        vbfs.insert(vbfs.end(), all_inputs[i].vbf.begin(),
+                    all_inputs[i].vbf.end());
+      }
+      const size_t num_inputs_a = input_idxs.size();
+
+      if (asset == LBTC) {
+        // Explicit fee output participates with abf=0, vbf=0.
+        values.push_back(feeSats);
+        abfs.insert(abfs.end(), ZERO32.begin(), ZERO32.end());
+        vbfs.insert(vbfs.end(), ZERO32.begin(), ZERO32.end());
+      }
+      for (size_t k = 0; k < blinded_idxs.size(); ++k) {
+        const auto& o = outs[blinded_idxs[k]];
+        values.push_back(o.value);
+        abfs.insert(abfs.end(), o.abf.begin(), o.abf.end());
+        if (k + 1 < blinded_idxs.size()) {
+          vbfs.insert(vbfs.end(), o.vbf.begin(), o.vbf.end());
+        }
+      }
+
+      std::vector<unsigned char> vbf_final(32, 0);
       CHECK_WALLY(wally_asset_final_vbf(
-          fee_values_for_vbf.data(), fee_values_for_vbf.size(), feeIdx.size(),
-          fee_abfs_for_vbf.data(), fee_abfs_for_vbf.size(),
-          fee_vbfs_for_vbf.data(), fee_vbfs_for_vbf.size(),
-          feeChange_vbf.data(), feeChange_vbf.size()));
+          values.data(), values.size(), num_inputs_a, abfs.data(), abfs.size(),
+          vbfs.data(), vbfs.size(), vbf_final.data(), vbf_final.size()));
+      outs[blinded_idxs.back()].vbf = vbf_final;
     }
 
-    // Build inputIdxCombined (vin order) and combined arrays for
-    // surjectionproof
-    std::vector<size_t> inputIdxCombined = transferIdx;
-    if (!feeAssetSame)
-      inputIdxCombined.insert(inputIdxCombined.end(), feeIdx.begin(),
-                              feeIdx.end());
-    const size_t num_inputs_combined = inputIdxCombined.size();
-
-    std::vector<std::vector<unsigned char>> combined_input_prev_txid_for_vin;
-    std::vector<uint32_t> combined_vouts_in;
-    combined_input_prev_txid_for_vin.reserve(num_inputs_combined);
-    combined_vouts_in.reserve(num_inputs_combined);
-
-    for (auto idx : inputIdxCombined) {
-      combined_input_prev_txid_for_vin.push_back(input_prev_txid_for_vin[idx]);
-      combined_vouts_in.push_back(vouts_in[idx]);
+    // Surjection proof candidates: all inputs in their tx order.
+    std::vector<unsigned char> surj_asset_ids;
+    std::vector<unsigned char> surj_abfs;
+    std::vector<unsigned char> surj_asset_gens;
+    surj_asset_ids.reserve(all_inputs.size() * 32);
+    surj_abfs.reserve(all_inputs.size() * 32);
+    surj_asset_gens.reserve(all_inputs.size() * ASSET_GENERATOR_LEN);
+    for (const auto& ii : all_inputs) {
+      surj_asset_ids.insert(surj_asset_ids.end(), ii.asset_id.begin(),
+                            ii.asset_id.end());
+      surj_abfs.insert(surj_abfs.end(), ii.abf.begin(), ii.abf.end());
+      surj_asset_gens.insert(surj_asset_gens.end(), ii.asset_gen.begin(),
+                             ii.asset_gen.end());
     }
 
-    std::vector<unsigned char> combined_asset_ids_in_for_surj;
-    std::vector<unsigned char> combined_abfs_in_for_surj;
-    std::vector<unsigned char> combined_asset_generators_in_for_surj;
-    combined_asset_ids_in_for_surj.reserve(num_inputs_combined * 32);
-    combined_abfs_in_for_surj.reserve(num_inputs_combined * 32);
-    combined_asset_generators_in_for_surj.reserve(num_inputs_combined *
-                                                  ASSET_GENERATOR_LEN);
-
-    for (auto idx : inputIdxCombined) {
-      combined_asset_ids_in_for_surj.insert(
-          combined_asset_ids_in_for_surj.end(), asset_ids_in.begin() + idx * 32,
-          asset_ids_in.begin() + (idx + 1) * 32);
-      combined_abfs_in_for_surj.insert(combined_abfs_in_for_surj.end(),
-                                       abfs_in.begin() + idx * 32,
-                                       abfs_in.begin() + (idx + 1) * 32);
-      combined_asset_generators_in_for_surj.insert(
-          combined_asset_generators_in_for_surj.end(),
-          asset_generators_in.begin() + idx * ASSET_GENERATOR_LEN,
-          asset_generators_in.begin() + (idx + 1) * ASSET_GENERATOR_LEN);
-    }
-
-    // Create tx
-    const size_t num_outputs = 1 + n + (createFeeChange ? 1 : 0);
     struct wally_tx* output_tx = nullptr;
-    CHECK_WALLY(wally_tx_init_alloc(2, 0, num_inputs_combined, num_outputs,
+    CHECK_WALLY(wally_tx_init_alloc(2, 0, all_inputs.size(), outs.size(),
                                     &output_tx));
 
-    // Fee output explicit (vout0)
-    std::vector<unsigned char> fee_asset(1 + 32);
-    fee_asset[0] = 0x01;
-    std::memcpy(fee_asset.data() + 1, WallyUtils::C().LBTC_ASSET_ID.data(), 32);
+    for (const auto& o : outs) {
+      if (o.explicit_fee) {
+        std::vector<unsigned char> fee_asset(1 + 32);
+        fee_asset[0] = 0x01;
+        std::memcpy(fee_asset.data() + 1, o.asset_id.data(), 32);
+        std::vector<unsigned char> fee_value(WALLY_TX_ASSET_CT_VALUE_UNBLIND_LEN);
+        CHECK_WALLY(wally_tx_confidential_value_from_satoshi(
+            o.value, fee_value.data(), fee_value.size()));
+        CHECK_WALLY(wally_tx_add_elements_raw_output(
+            output_tx, nullptr, 0, fee_asset.data(), fee_asset.size(),
+            fee_value.data(), fee_value.size(), nullptr, 0, nullptr, 0,
+            nullptr, 0, 0));
+        continue;
+      }
 
-    std::vector<unsigned char> fee_value(WALLY_TX_ASSET_CT_VALUE_UNBLIND_LEN);
-    CHECK_WALLY(wally_tx_confidential_value_from_satoshi(
-        feeSats, fee_value.data(), fee_value.size()));
-
-    CHECK_WALLY(wally_tx_add_elements_raw_output(
-        output_tx, nullptr, 0, fee_asset.data(), fee_asset.size(),
-        fee_value.data(), fee_value.size(), nullptr, 0, nullptr, 0, nullptr, 0,
-        0));
-
-    // Recipient outputs (transfer asset)
-    for (size_t i = 0; i < n; i++) {
-      const uint64_t value = output_values[i];
-      const auto& abf = abfs_recipient[i];
-      const auto& vbf = vbfs_recipient_all[i];
-      const auto& blinding_pubkey =
-          WallyUtils::GetBlindingPubKeyFromConfidentialAddress(
-              destinationConfAddrs[i]);
-      const auto& script_pubkey =
-          WallyUtils::GetScriptPubkeyFromConfidentialAddress(
-              destinationConfAddrs[i]);
+      const auto blinding_pubkey =
+          WallyUtils::GetBlindingPubKeyFromConfidentialAddress(o.conf_addr);
+      const auto script_pubkey =
+          WallyUtils::GetScriptPubkeyFromConfidentialAddress(o.conf_addr);
 
       std::vector<unsigned char> generator(ASSET_GENERATOR_LEN);
       CHECK_WALLY(wally_asset_generator_from_bytes(
-          assetIdToSend.data(), assetIdToSend.size(), abf.data(), abf.size(),
+          o.asset_id.data(), o.asset_id.size(), o.abf.data(), o.abf.size(),
           generator.data(), generator.size()));
 
       std::vector<unsigned char> value_commitment_out(ASSET_COMMITMENT_LEN);
       CHECK_WALLY(wally_asset_value_commitment(
-          value, vbf.data(), vbf.size(), generator.data(), generator.size(),
-          value_commitment_out.data(), value_commitment_out.size()));
-
-      auto eph_priv = WallyUtils::RandomEcPrivateKey();
-      std::vector<unsigned char> eph_pub(EC_PUBLIC_KEY_LEN);
-      CHECK_WALLY(wally_ec_public_key_from_private_key(
-          eph_priv.data(), eph_priv.size(), eph_pub.data(), eph_pub.size()));
-
-      std::vector<unsigned char> rangeproof(ASSET_RANGEPROOF_MAX_LEN);
-      size_t rangeproof_len = 0;
-      CHECK_WALLY(wally_asset_rangeproof(
-          value, blinding_pubkey.data(), blinding_pubkey.size(),
-          eph_priv.data(), eph_priv.size(), assetIdToSend.data(),
-          assetIdToSend.size(), abf.data(), abf.size(), vbf.data(), vbf.size(),
-          value_commitment_out.data(), value_commitment_out.size(),
-          script_pubkey.data(), script_pubkey.size(), generator.data(),
-          generator.size(), 1, 0, 36, rangeproof.data(), rangeproof.size(),
-          &rangeproof_len));
-      rangeproof.resize(rangeproof_len);
-
-      std::vector<unsigned char> surj(ASSET_SURJECTIONPROOF_MAX_LEN);
-      size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
-      auto surj_entropy = WallyUtils::RandomBytes(32);
-      CHECK_WALLY(wally_asset_surjectionproof(
-          assetIdToSend.data(), assetIdToSend.size(), abf.data(), abf.size(),
-          generator.data(), generator.size(), surj_entropy.data(),
-          surj_entropy.size(), combined_asset_ids_in_for_surj.data(),
-          combined_asset_ids_in_for_surj.size(),
-          combined_abfs_in_for_surj.data(), combined_abfs_in_for_surj.size(),
-          combined_asset_generators_in_for_surj.data(),
-          combined_asset_generators_in_for_surj.size(), surj.data(),
-          surj.size(), &surj_len));
-      surj.resize(surj_len);
-
-      CHECK_WALLY(wally_tx_add_elements_raw_output(
-          output_tx, script_pubkey.data(), script_pubkey.size(),
-          generator.data(), generator.size(), value_commitment_out.data(),
-          value_commitment_out.size(), eph_pub.data(), eph_pub.size(),
-          surj.data(), surj.size(), rangeproof.data(), rangeproof.size(), 0));
-    }
-
-    // Fee change output (if any)
-    if (createFeeChange) {
-      std::vector<unsigned char> generator(ASSET_GENERATOR_LEN);
-      CHECK_WALLY(wally_asset_generator_from_bytes(
-          WallyUtils::C().LBTC_ASSET_ID.data(),
-          WallyUtils::C().LBTC_ASSET_ID.size(), feeChange_abf.data(),
-          feeChange_abf.size(), generator.data(), generator.size()));
-
-      std::vector<unsigned char> value_commitment_out(ASSET_COMMITMENT_LEN);
-      CHECK_WALLY(wally_asset_value_commitment(
-          feeRemaining, feeChange_vbf.data(), feeChange_vbf.size(),
-          generator.data(), generator.size(), value_commitment_out.data(),
+          o.value, o.vbf.data(), o.vbf.size(), generator.data(),
+          generator.size(), value_commitment_out.data(),
           value_commitment_out.size()));
 
       auto eph_priv = WallyUtils::RandomEcPrivateKey();
@@ -911,39 +836,25 @@ class WallySigner {
 
       std::vector<unsigned char> rangeproof(ASSET_RANGEPROOF_MAX_LEN);
       size_t rangeproof_len = 0;
-
-      const auto& blinding_pubkey =
-          WallyUtils::GetBlindingPubKeyFromConfidentialAddress(
-              feeChangeConfAddr);
-      const auto& script_pubkey =
-          WallyUtils::GetScriptPubkeyFromConfidentialAddress(feeChangeConfAddr);
-
       CHECK_WALLY(wally_asset_rangeproof(
-          feeRemaining, blinding_pubkey.data(), blinding_pubkey.size(),
-          eph_priv.data(), eph_priv.size(),
-          WallyUtils::C().LBTC_ASSET_ID.data(),
-          WallyUtils::C().LBTC_ASSET_ID.size(), feeChange_abf.data(),
-          feeChange_abf.size(), feeChange_vbf.data(), feeChange_vbf.size(),
-          value_commitment_out.data(), value_commitment_out.size(),
-          script_pubkey.data(), script_pubkey.size(), generator.data(),
-          generator.size(), 1, 0, 36, rangeproof.data(), rangeproof.size(),
-          &rangeproof_len));
+          o.value, blinding_pubkey.data(), blinding_pubkey.size(),
+          eph_priv.data(), eph_priv.size(), o.asset_id.data(),
+          o.asset_id.size(), o.abf.data(), o.abf.size(), o.vbf.data(),
+          o.vbf.size(), value_commitment_out.data(),
+          value_commitment_out.size(), script_pubkey.data(),
+          script_pubkey.size(), generator.data(), generator.size(), 1, 0, 36,
+          rangeproof.data(), rangeproof.size(), &rangeproof_len));
       rangeproof.resize(rangeproof_len);
 
       std::vector<unsigned char> surj(ASSET_SURJECTIONPROOF_MAX_LEN);
       size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
       auto surj_entropy = WallyUtils::RandomBytes(32);
       CHECK_WALLY(wally_asset_surjectionproof(
-          WallyUtils::C().LBTC_ASSET_ID.data(),
-          WallyUtils::C().LBTC_ASSET_ID.size(), feeChange_abf.data(),
-          feeChange_abf.size(), generator.data(), generator.size(),
-          surj_entropy.data(), surj_entropy.size(),
-          combined_asset_ids_in_for_surj.data(),
-          combined_asset_ids_in_for_surj.size(),
-          combined_abfs_in_for_surj.data(), combined_abfs_in_for_surj.size(),
-          combined_asset_generators_in_for_surj.data(),
-          combined_asset_generators_in_for_surj.size(), surj.data(),
-          surj.size(), &surj_len));
+          o.asset_id.data(), o.asset_id.size(), o.abf.data(), o.abf.size(),
+          generator.data(), generator.size(), surj_entropy.data(),
+          surj_entropy.size(), surj_asset_ids.data(), surj_asset_ids.size(),
+          surj_abfs.data(), surj_abfs.size(), surj_asset_gens.data(),
+          surj_asset_gens.size(), surj.data(), surj.size(), &surj_len));
       surj.resize(surj_len);
 
       CHECK_WALLY(wally_tx_add_elements_raw_output(
@@ -953,28 +864,21 @@ class WallySigner {
           surj.data(), surj.size(), rangeproof.data(), rangeproof.size(), 0));
     }
 
-    // Inputs spending prevouts
-    for (size_t vin = 0; vin < num_inputs_combined; vin++) {
-      const auto& prev_tx_id = combined_input_prev_txid_for_vin[vin];
+    for (const auto& ii : all_inputs) {
       CHECK_WALLY(wally_tx_add_elements_raw_input(
-          output_tx, prev_tx_id.data(), prev_tx_id.size(),
-          combined_vouts_in[vin], 0xffffffff, nullptr,
-          0,           // script + script_len
-          nullptr,     // witness
-          nullptr, 0,  // nonce + nonce_len
-          nullptr, 0,  // entropy + entropy_len
-          nullptr, 0,  // issuance_amount + issuance_amount_len
-          nullptr, 0,  // inflation_keys + inflation_keys_len
-          nullptr,
-          0,  // issuance_amount_rangeproof + issuance_amount_rangeproof_len
-          nullptr,
-          0,        // inflation_keys_rangeproof + inflation_keys_rangeproof_len
-          nullptr,  // pegin_witness
-          0));      // flags
+          output_tx, ii.tx_id.data(), ii.tx_id.size(), ii.vout, 0xffffffff,
+          nullptr, 0,    // script + script_len
+          nullptr,       // witness
+          nullptr, 0,    // nonce + nonce_len
+          nullptr, 0,    // entropy + entropy_len
+          nullptr, 0,    // issuance_amount + issuance_amount_len
+          nullptr, 0,    // inflation_keys + inflation_keys_len
+          nullptr, 0,    // issuance_amount_rangeproof + len
+          nullptr, 0,    // inflation_keys_rangeproof + len
+          nullptr,       // pegin_witness
+          0));           // flags
     }
 
-    // Serialize unsigned tx (witness stacks empty). Call SignTx(hex, inputs)
-    // later to produce a broadcast-ready transaction.
     char* txhex = nullptr;
     CHECK_WALLY(wally_tx_to_hex(output_tx, tx_flags_, &txhex));
     std::string txHexOut(txhex);
