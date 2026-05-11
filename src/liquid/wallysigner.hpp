@@ -939,6 +939,83 @@ class WallySigner {
     wally_tx_free(tx);
     return signed_hex;
   }
+
+  // P2WPKH witness weight units, per signed input:
+  //   1   (witness item count = 2)
+  // + 1   (sig length byte) + 72 (DER sig + sighash byte, avg/upper bound)
+  // + 1   (pubkey length byte) + 33 (compressed pubkey)
+  // = 108 WU
+  static constexpr size_t kP2WPKHWitnessWU = 108;
+
+  // Compute the vsize (vbytes) of a hypothetical *signed* tx given an unsigned
+  // hex (witness stacks empty). Adds `witness_wu_per_input` weight units for
+  // every input, then applies the Elements confidential-output discount, then
+  // converts to vsize. Default witness size assumes P2WPKH on every input.
+  static size_t ComputeSignedVsize(
+      const std::string& unsigned_tx_hex,
+      size_t witness_wu_per_input = kP2WPKHWitnessWU) {
+    constexpr uint32_t kTxFlags =
+        WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS;
+    struct wally_tx* tx = nullptr;
+    CHECK_WALLY(wally_tx_from_hex(unsigned_tx_hex.c_str(), kTxFlags, &tx));
+
+    size_t weight = 0;
+    CHECK_WALLY(wally_tx_get_weight(tx, &weight));
+
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+    weight += num_inputs * witness_wu_per_input;
+
+    size_t discount = 0;
+    CHECK_WALLY(wally_tx_get_elements_weight_discount(tx, 0, &discount));
+    if (discount > weight) discount = weight;
+    weight -= discount;
+
+    size_t vsize = 0;
+    CHECK_WALLY(wally_tx_vsize_from_weight(weight, &vsize));
+    wally_tx_free(tx);
+    return vsize;
+  }
+
+  // Fee from virtual size and feerate in sat/kvB (satoshis per 1000 vbytes).
+  // Liquid defaults are often quoted as e.g. 0.1 sat/vB (= 100 sat/kvB).
+  // Uses ceiling integer math so small txs still pay at least the proportional fee.
+  static uint64_t FeeSatsFromVsizeAndKvBRate(size_t vsize,
+                                             uint64_t fee_rate_sat_per_kvb) {
+    return (static_cast<uint64_t>(vsize) * fee_rate_sat_per_kvb + 999) / 1000;
+  }
+
+  // Estimate the vsize of the would-be-signed Liquid tx that CreateTx +
+  // SignTx would produce for the given inputs/destinations/changeConfAddr.
+  //
+  // `feeSatsHint` is the placeholder fee used while building the throw-away
+  // unsigned tx. Its value almost never affects vsize, *except* when changing
+  // it would add or remove a change output (e.g. when LBTC inputs ≈ feeSats).
+  // Pass an approximate target fee if your situation is on that boundary;
+  // for typical wallets the default of 1 sat is fine.
+  size_t EstimateSignedVsize(
+      const std::vector<LiquidUtxos>& inputs,
+      const AssetDestinations& destinations,
+      const std::string& changeConfAddr, uint64_t feeSatsHint = 1,
+      size_t witness_wu_per_input = kP2WPKHWitnessWU) {
+    const std::string placeholder_hex =
+        CreateTx(inputs, destinations, changeConfAddr, feeSatsHint);
+    return ComputeSignedVsize(placeholder_hex, witness_wu_per_input);
+  }
+
+  // Convenience: fee in sats from estimated signed vsize and feerate sat/kvB.
+  // See EstimateSignedVsize for caveats on `feeSatsHint`.
+  uint64_t EstimateFee(const std::vector<LiquidUtxos>& inputs,
+                       const AssetDestinations& destinations,
+                       const std::string& changeConfAddr,
+                       uint64_t fee_rate_sat_per_kvb,
+                       uint64_t feeSatsHint = 1,
+                       size_t witness_wu_per_input = kP2WPKHWitnessWU) {
+    const size_t vsize = EstimateSignedVsize(inputs, destinations,
+                                             changeConfAddr, feeSatsHint,
+                                             witness_wu_per_input);
+    return FeeSatsFromVsizeAndKvBRate(vsize, fee_rate_sat_per_kvb);
+  }
 };
 }  // namespace nunchuk::wally
 
