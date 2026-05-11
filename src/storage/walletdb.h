@@ -154,8 +154,8 @@ class NunchukWalletDb : public NunchukDb {
   bool IsSupportLiquid() const;
 
  private:
-  const char* TxTable() const;
-  const char* AddressTable() const;
+  const char *TxTable() const;
+  const char *AddressTable() const;
   void CreateCoinControlTable();
   void CreateDummyTxTable();
   void ClearCoinControlData();
@@ -173,6 +173,8 @@ class NunchukWalletDb : public NunchukDb {
   bool IsMyChange(const std::string &address);
   std::map<std::string, UnspentOutput> GetCoinsFromTransactions(
       const std::vector<Transaction> &transactions);
+  std::vector<std::string> GetVtxValues();
+
   static std::map<std::string, std::map<std::string, AddressData>> addr_cache_;
   static std::map<std::string, std::vector<SingleSigner>> signer_cache_;
   static std::map<std::string, std::map<int, bool>> collection_auto_lock_;
