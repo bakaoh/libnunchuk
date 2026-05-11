@@ -51,6 +51,7 @@ const int ULTRA_HIGH_DENSITY_BBQR = 40;
 const int64_t UNDETERMINED_TIMELOCK_VALUE = INT64_MAX;
 
 typedef int64_t Amount;
+typedef std::vector<unsigned char> AssetId;  // 32 bytes
 struct TxInput {
   std::string txid;
   uint32_t vout;
@@ -77,6 +78,7 @@ struct TxOutput {
   bool isChange{false};
   bool isReceive{false};
   Amount userAmount{0};
+  AssetId assetId{};
 
   TxOutput() = default;
   TxOutput(const std::string& address, Amount amount)
@@ -85,14 +87,13 @@ struct TxOutput {
   bool operator==(const TxOutput& other) const {
     return address == other.address && amount == other.amount &&
            isChange == other.isChange && isReceive == other.isReceive &&
-           userAmount == other.userAmount;
+           userAmount == other.userAmount && assetId == other.assetId;
   }
   bool operator!=(const TxOutput& other) const { return !(*this == other); }
 };
 typedef std::map<std::string, bool> RequestTokens;  // token-sent map
 typedef std::vector<size_t> ScriptNodeId;
 typedef std::vector<ScriptNodeId> SigningPath;
-typedef std::vector<unsigned char> AssetId;  // 32 bytes
 
 enum class AddressType {
   ANY,

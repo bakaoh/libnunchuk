@@ -174,6 +174,9 @@ class NunchukWalletDb : public NunchukDb {
   std::map<std::string, UnspentOutput> GetCoinsFromTransactions(
       const std::vector<Transaction> &transactions);
   std::vector<std::string> GetVtxValues();
+  Transaction GetTransactionFromVtxValue(const std::string &value,
+                                         const nunchuk::Wallet &wallet,
+                                         int height);
 
   static std::map<std::string, std::map<std::string, AddressData>> addr_cache_;
   static std::map<std::string, std::vector<SingleSigner>> signer_cache_;

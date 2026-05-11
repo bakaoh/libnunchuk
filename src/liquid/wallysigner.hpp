@@ -52,6 +52,7 @@ struct LiquidUtxos {
 struct AddressDetail {
   uint32_t index;
   std::string address;
+  bool isChange;
 };
 
 class WallySigner {
@@ -181,6 +182,105 @@ class WallySigner {
     return {signing_priv_key, signing_pub_key};
   }
 
+  Transaction GetTransactionFromTx(const std::string& txHex, int height) {
+    struct wally_tx* tx{nullptr};
+    CHECK_WALLY(wally_tx_from_hex(txHex.c_str(), tx_flags_, &tx));
+    std::vector<unsigned char> txid(32);
+    CHECK_WALLY(wally_tx_get_txid(tx, txid.data(), txid.size()));
+    std::reverse(txid.begin(), txid.end());
+
+    Transaction rs;
+    rs.set_txid(WallyUtils::HexFromBytes(txid.data(), txid.size()));
+    rs.set_height(height);
+    rs.set_lock_time(tx->locktime);
+    rs.set_raw(txHex);
+    for (size_t vin = 0; vin < tx->num_inputs; vin++) {
+      const auto& txin = tx->inputs[vin];
+      std::vector<unsigned char> vin_txid(txin.txhash,
+                                          txin.txhash + WALLY_TXHASH_LEN);
+      std::reverse(vin_txid.begin(), vin_txid.end());
+      std::string vin_txid_str =
+          WallyUtils::HexFromBytes(vin_txid.data(), vin_txid.size());
+      rs.add_input({vin_txid_str, txin.index, txin.sequence});
+    }
+    for (size_t vout = 0; vout < tx->num_outputs; vout++) {
+      const auto& txout = tx->outputs[vout];
+      std::vector<unsigned char> script(txout.script,
+                                        txout.script + txout.script_len);
+      if (!spk_.contains(script)) continue;
+      auto privateBlindingKey = GetBlindingKey(script);
+
+      std::vector<unsigned char> nonce(txout.nonce,
+                                       txout.nonce + txout.nonce_len);
+      std::vector<unsigned char> rangeproof(
+          txout.rangeproof, txout.rangeproof + txout.rangeproof_len);
+      std::vector<unsigned char> asset_commitment(
+          txout.asset, txout.asset + txout.asset_len);
+      std::vector<unsigned char> value_commitment_from_tx(
+          txout.value, txout.value + txout.value_len);
+
+      // Unblind using the output nonce (ephemeral pubkey), rangeproof,
+      // value+asset commitments
+      std::vector<unsigned char> asset_out(ASSET_TAG_LEN);
+      std::vector<unsigned char> abf_out(BLINDING_FACTOR_LEN);
+      std::vector<unsigned char> vbf_out(BLINDING_FACTOR_LEN);
+      uint64_t value_out = 0;
+
+      CHECK_WALLY(wally_asset_unblind(
+          nonce.data(), nonce.size(), privateBlindingKey.data(),
+          privateBlindingKey.size(), rangeproof.data(), rangeproof.size(),
+          value_commitment_from_tx.data(), value_commitment_from_tx.size(),
+          script.data(), script.size(), asset_commitment.data(),
+          asset_commitment.size(), asset_out.data(), asset_out.size(),
+          abf_out.data(), abf_out.size(), vbf_out.data(), vbf_out.size(),
+          &value_out));
+
+      std::vector<unsigned char> asset_id(asset_out.begin(), asset_out.end());
+      std::vector<unsigned char> asset_generator(ASSET_GENERATOR_LEN);
+      CHECK_WALLY(wally_asset_generator_from_bytes(
+          asset_id.data(), asset_id.size(), abf_out.data(), abf_out.size(),
+          asset_generator.data(), asset_generator.size()));
+      if (asset_commitment != asset_generator) {
+        wally_tx_free(tx);
+        throw std::runtime_error(
+            "asset_generator mismatch with asset_commitment");
+      }
+
+      // Recompute and sanity-check value commitment
+      std::vector<unsigned char> recomputed_value_commitment(
+          ASSET_COMMITMENT_LEN);
+      CHECK_WALLY(wally_asset_value_commitment(
+          value_out, vbf_out.data(), vbf_out.size(), asset_generator.data(),
+          asset_generator.size(), recomputed_value_commitment.data(),
+          recomputed_value_commitment.size()));
+      if (value_commitment_from_tx != recomputed_value_commitment) {
+        wally_tx_free(tx);
+        throw std::runtime_error(
+            "value_commitment mismatch: unblind factors don't recompute "
+            "original commitment");
+      }
+
+      AddressDetail address_detail = spk_[script];
+      TxOutput output{address_detail.address, Amount(value_out)};
+      output.isChange = address_detail.isChange;
+      output.isReceive = true;
+      output.assetId = AssetId(asset_id.begin(), asset_id.end());
+      rs.add_output(output);
+    }
+    if (height == 0) {
+      rs.set_status(TransactionStatus::PENDING_CONFIRMATION);
+    } else if (height == -2) {
+      rs.set_status(TransactionStatus::NETWORK_REJECTED);
+    } else if (height == -1) {
+      rs.set_status(TransactionStatus::READY_TO_BROADCAST);
+    } else if (height > 0) {
+      rs.set_status(TransactionStatus::CONFIRMED);
+    }
+
+    wally_tx_free(tx);
+    return rs;
+  }
+
   LiquidUtxos GetUtxosFromTx(const std::string& txHex,
                              const std::string& address = {}) {
     LiquidUtxos out;
@@ -198,7 +298,7 @@ class WallySigner {
       const auto& txin = tx->inputs[vin];
       out.vins_tx_id[vin] = std::vector<unsigned char>(
           txin.txhash, txin.txhash + WALLY_TXHASH_LEN);
-      out.vins_vout[vin] = static_cast<uint32_t>(vin);
+      out.vins_vout[vin] = txin.index;
     }
 
     size_t num_outputs = 0;

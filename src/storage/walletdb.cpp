@@ -683,7 +683,7 @@ bool NunchukWalletDb::UpdateTransaction(const std::string& raw_tx, int height,
   // TODO: liquid update transaction
   auto wallet = GetWallet(true, true);
   if (height == -1) {
-    auto [tx, is_hex_tx] = GetTransactionFromStr(raw_tx, wallet, -1);
+    auto tx = GetTransactionFromVtxValue(raw_tx, wallet, -1);
     std::string tx_id = tx.get_txid();
 
     sqlite3_stmt* stmt;
@@ -740,7 +740,7 @@ bool NunchukWalletDb::UpdateTransaction(const std::string& raw_tx, int height,
     if (sqlite3_column_text(stmt, 1)) {
       std::string value = std::string((char*)sqlite3_column_text(stmt, 0));
       extra = std::string((char*)sqlite3_column_text(stmt, 1));
-      auto [tx, is_hex_tx] = GetTransactionFromStr(value, wallet, -1);
+      auto tx = GetTransactionFromVtxValue(value, wallet, -1);
 
       json extra_json = extra.empty() ? json{} : json::parse(extra);
       extra_json["signers"] = tx.get_signers();
@@ -1012,7 +1012,7 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     int change_pos = sqlite3_column_int(stmt, 5);
     time_t blocktime = sqlite3_column_int64(stmt, 6);
 
-    auto [tx, is_hex_tx] = GetTransactionFromStr(value, wallet, height);
+    auto tx = GetTransactionFromVtxValue(value, wallet, height);
     tx.set_txid(tx_id);
     tx.set_m(wallet.get_m());
     tx.set_wallet_type(wallet.get_wallet_type());
@@ -1031,11 +1031,6 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     // become false
     tx.set_receive(false);
     tx.set_sub_amount(0);
-    if (is_hex_tx) {
-      tx.set_raw(value);
-    } else {
-      tx.set_psbt(value);
-    }
 
     if (sqlite3_column_text(stmt, 7)) {
       std::string extra = std::string((char*)sqlite3_column_text(stmt, 7));
@@ -1121,7 +1116,7 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
       int change_pos = sqlite3_column_int(stmt, 5);
       time_t blocktime = sqlite3_column_int64(stmt, 6);
 
-      auto [tx, is_hex_tx] = GetTransactionFromStr(value, wallet, height);
+      auto tx = GetTransactionFromVtxValue(value, wallet, height);
       tx.set_txid(tx_id);
       tx.set_m(wallet.get_m());
       tx.set_wallet_type(wallet.get_wallet_type());
@@ -1137,11 +1132,6 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
       tx.set_receive(false);
       tx.set_sub_amount(0);
       tx.set_memo(memo);
-      if (is_hex_tx) {
-        tx.set_raw(value);
-      } else {
-        tx.set_psbt(value);
-      }
 
       if (sqlite3_column_text(stmt, 7)) {
         std::string extra = std::string((char*)sqlite3_column_text(stmt, 7));
@@ -1181,6 +1171,20 @@ std::vector<std::string> NunchukWalletDb::GetVtxValues() {
   }
   SQLCHECK(sqlite3_finalize(stmt));
   return rs;
+}
+
+Transaction NunchukWalletDb::GetTransactionFromVtxValue(
+    const std::string& value, const nunchuk::Wallet& wallet, int height) {
+  if (wallet.get_wallet_type() == WalletType::LIQUID) {
+    return wally_signer_->GetTransactionFromTx(value, height);
+  }
+  auto [tx, is_hex_tx] = GetTransactionFromStr(value, wallet, height);
+  if (is_hex_tx) {
+    tx.set_raw(value);
+  } else {
+    tx.set_psbt(value);
+  }
+  return tx;
 }
 
 std::string NunchukWalletDb::FillPsbt(const std::string& base64_psbt) {
