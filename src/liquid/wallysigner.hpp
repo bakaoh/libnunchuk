@@ -45,6 +45,8 @@ struct LiquidUtxos {
   std::vector<std::vector<unsigned char>>
       value_commitments_in;  // 33 bytes each
   std::vector<uint32_t> vouts_in;
+  std::vector<std::vector<unsigned char>> vins_tx_id;
+  std::vector<uint32_t> vins_vout;
 };
 
 struct AddressDetail {
@@ -188,9 +190,19 @@ class WallySigner {
     out.tx_id.resize(32);
     CHECK_WALLY(wally_tx_get_txid(tx, out.tx_id.data(), out.tx_id.size()));
 
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+    out.vins_tx_id.resize(num_inputs);
+    out.vins_vout.resize(num_inputs);
+    for (size_t vin = 0; vin < num_inputs; vin++) {
+      const auto& txin = tx->inputs[vin];
+      out.vins_tx_id[vin] = std::vector<unsigned char>(
+          txin.txhash, txin.txhash + WALLY_TXHASH_LEN);
+      out.vins_vout[vin] = static_cast<uint32_t>(vin);
+    }
+
     size_t num_outputs = 0;
     CHECK_WALLY(wally_tx_get_num_outputs(tx, &num_outputs));
-
     for (size_t vout = 0; vout < num_outputs; vout++) {
       const auto& txout = tx->outputs[vout];
       std::vector<unsigned char> script(txout.script,
