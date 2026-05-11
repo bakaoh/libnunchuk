@@ -866,6 +866,279 @@ Transaction NunchukWalletDb::CreatePsbt(
   return tx;
 }
 
+Transaction NunchukWalletDb::CreateLiquidTransaction(
+    const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+    Amount fee_rate, const std::string& memo, bool persist) {
+  if (!IsSupportLiquid() || !wally_signer_) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Wallet is not a Liquid wallet");
+  }
+  if (outputs.empty()) {
+    throw NunchukException(NunchukException::INVALID_PARAMETER,
+                           "outputs must be non-empty");
+  }
+  if (fee_rate <= 0) {
+    throw NunchukException(NunchukException::INVALID_PARAMETER,
+                           "fee_rate must be > 0 sat/kvB");
+  }
+
+  // 1) Load all known transactions and unblind their outputs that belong to
+  // this wallet. Each call returns one LiquidUtxos per source tx that contains
+  // every wallet-owned output of that tx (multi-asset capable).
+  std::vector<std::string> tx_hexes = GetVtxValues();
+  std::vector<wally::LiquidUtxos> per_tx_utxos;
+  per_tx_utxos.reserve(tx_hexes.size());
+  for (const auto& hex : tx_hexes) {
+    per_tx_utxos.push_back(wally_signer_->GetUtxosFromTx(hex));
+  }
+
+  // 2) Compute the set of spent outpoints by scanning inputs of every known tx.
+  std::set<std::pair<std::vector<unsigned char>, uint32_t>> spent;
+  for (const auto& u : per_tx_utxos) {
+    for (size_t i = 0; i < u.vins_tx_id.size(); ++i) {
+      spent.insert({u.vins_tx_id[i], u.vins_vout[i]});
+    }
+  }
+
+  // 3) Flatten available coins (txIdx, k) for greedy selection.
+  struct Coin {
+    size_t tx_idx;
+    size_t k;
+    AssetId asset_id;
+    Amount value;
+  };
+  std::vector<Coin> coins;
+  for (size_t t = 0; t < per_tx_utxos.size(); ++t) {
+    const auto& u = per_tx_utxos[t];
+    for (size_t k = 0; k < u.vouts_in.size(); ++k) {
+      if (spent.count({u.tx_id, u.vouts_in[k]})) continue;
+      AssetId aid(u.asset_ids_in.begin() + k * 32,
+                  u.asset_ids_in.begin() + (k + 1) * 32);
+      coins.push_back({t, k, std::move(aid), Amount(u.values_in[k])});
+    }
+  }
+
+  std::map<AssetId, std::vector<size_t>> coins_by_asset;
+  for (size_t i = 0; i < coins.size(); ++i) {
+    coins_by_asset[coins[i].asset_id].push_back(i);
+  }
+  for (auto& [_, v] : coins_by_asset) {
+    std::sort(v.begin(), v.end(), [&](size_t a, size_t b) {
+      return coins[a].value > coins[b].value;  // largest-first
+    });
+  }
+
+  const AssetId LBTC = wally::WallyUtils::C().LBTC_ASSET_ID;
+
+  // 4) Per-asset targets and destination map for wally::WallySigner::CreateTx.
+  std::map<AssetId, Amount> targets;
+  wally::WallySigner::AssetDestinations destinations;
+  for (const auto& [aid, dest_map] : outputs) {
+    if (aid.size() != 32) {
+      throw NunchukException(NunchukException::INVALID_PARAMETER,
+                             "Invalid asset id (must be 32 bytes)");
+    }
+    Amount sum = 0;
+    for (const auto& [addr, amount] : dest_map) {
+      if (amount <= 0) {
+        throw NunchukException(NunchukException::INVALID_PARAMETER,
+                               "Output amount must be > 0");
+      }
+      destinations[aid][addr] = static_cast<uint64_t>(amount);
+      sum += amount;
+    }
+    targets[aid] = sum;
+  }
+  if (!targets.count(LBTC)) targets[LBTC] = 0;  // still needed to pay fee
+
+  // 5) Change address: pick an unused internal confidential address.
+  auto unused_internal = GetAddresses(/*used=*/false, /*internal=*/true);
+  if (unused_internal.empty()) {
+    throw NunchukException(NunchukException::INVALID_ADDRESS,
+                           "No unused internal Liquid address for change");
+  }
+  std::string change_addr =
+      wally_signer_->GetConfidentialAddressFromAddress(unused_internal.front());
+
+  // 6) Helpers.
+  auto select_for_asset =
+      [&](const AssetId& aid, Amount needed) -> std::vector<size_t> {
+    std::vector<size_t> picked;
+    auto it = coins_by_asset.find(aid);
+    if (it == coins_by_asset.end()) {
+      if (needed > 0) {
+        throw NunchukException(NunchukException::COIN_SELECTION_ERROR,
+                               "No UTXOs available for an asset");
+      }
+      return picked;
+    }
+    Amount accum = 0;
+    for (auto ci : it->second) {
+      picked.push_back(ci);
+      accum += coins[ci].value;
+      if (accum >= needed) break;
+    }
+    if (accum < needed) {
+      throw NunchukException(NunchukException::COIN_SELECTION_ERROR,
+                             "Insufficient balance for an asset");
+    }
+    return picked;
+  };
+
+  auto build_inputs = [&](const std::vector<size_t>& selected_idx) {
+    std::map<size_t, std::vector<size_t>> by_src;
+    for (auto ci : selected_idx) {
+      by_src[coins[ci].tx_idx].push_back(coins[ci].k);
+    }
+    std::vector<wally::LiquidUtxos> rs;
+    rs.reserve(by_src.size());
+    for (auto& [src, k_list] : by_src) {
+      std::sort(k_list.begin(), k_list.end());
+      const auto& s = per_tx_utxos[src];
+      wally::LiquidUtxos picked;
+      picked.tx_id = s.tx_id;
+      picked.vins_tx_id = s.vins_tx_id;
+      picked.vins_vout = s.vins_vout;
+      for (auto k : k_list) {
+        picked.asset_generators_in.insert(
+            picked.asset_generators_in.end(),
+            s.asset_generators_in.begin() + k * ASSET_GENERATOR_LEN,
+            s.asset_generators_in.begin() + (k + 1) * ASSET_GENERATOR_LEN);
+        picked.asset_ids_in.insert(picked.asset_ids_in.end(),
+                                   s.asset_ids_in.begin() + k * 32,
+                                   s.asset_ids_in.begin() + (k + 1) * 32);
+        picked.values_in.push_back(s.values_in[k]);
+        picked.abfs_in.insert(picked.abfs_in.end(),
+                              s.abfs_in.begin() + k * 32,
+                              s.abfs_in.begin() + (k + 1) * 32);
+        picked.vbfs_in.insert(picked.vbfs_in.end(),
+                              s.vbfs_in.begin() + k * 32,
+                              s.vbfs_in.begin() + (k + 1) * 32);
+        picked.script_pubkeys_in.push_back(s.script_pubkeys_in[k]);
+        picked.value_commitments_in.push_back(s.value_commitments_in[k]);
+        picked.vouts_in.push_back(s.vouts_in[k]);
+      }
+      rs.push_back(std::move(picked));
+    }
+    return rs;
+  };
+
+  // 7) Select non-LBTC assets first.
+  std::vector<size_t> selected;
+  for (const auto& [aid, target] : targets) {
+    if (aid == LBTC) continue;
+    auto sel = select_for_asset(aid, target);
+    selected.insert(selected.end(), sel.begin(), sel.end());
+  }
+
+  // 8) Fee estimation pass: trial with all LBTC inputs to compute an upper
+  // bound vsize, then choose minimal LBTC inputs to cover target + fee.
+  auto lbtc_it = coins_by_asset.find(LBTC);
+  if (lbtc_it == coins_by_asset.end()) {
+    throw NunchukException(NunchukException::COIN_SELECTION_ERROR,
+                           "No LBTC UTXOs available to pay fee");
+  }
+
+  uint64_t feeSats = 0;
+  {
+    std::vector<size_t> trial = selected;
+    trial.insert(trial.end(), lbtc_it->second.begin(), lbtc_it->second.end());
+    auto trial_inputs = build_inputs(trial);
+    size_t vsize = wally_signer_->EstimateSignedVsize(
+        trial_inputs, destinations, change_addr);
+    feeSats = wally::WallySigner::FeeSatsFromVsizeAndKvBRate(
+        vsize, static_cast<uint64_t>(fee_rate));
+  }
+
+  // Refine: pick LBTC to cover (target_lbtc + feeSats) and re-estimate once.
+  std::vector<size_t> lbtc_sel = select_for_asset(
+      LBTC, targets[LBTC] + static_cast<Amount>(feeSats));
+  auto with_lbtc = [&]() {
+    std::vector<size_t> all = selected;
+    all.insert(all.end(), lbtc_sel.begin(), lbtc_sel.end());
+    return all;
+  };
+  auto final_inputs = build_inputs(with_lbtc());
+  {
+    size_t vsize = wally_signer_->EstimateSignedVsize(
+        final_inputs, destinations, change_addr, feeSats);
+    uint64_t refined =
+        wally::WallySigner::FeeSatsFromVsizeAndKvBRate(
+            vsize, static_cast<uint64_t>(fee_rate));
+    // If refined fee needs more LBTC than currently selected, top up; else
+    // accept the refined value (it can only equal or shrink in typical cases).
+    if (refined > feeSats) {
+      lbtc_sel = select_for_asset(
+          LBTC, targets[LBTC] + static_cast<Amount>(refined));
+      final_inputs = build_inputs(with_lbtc());
+    }
+    feeSats = refined;
+  }
+
+  // 9) Build the unsigned transaction and compute final signed vsize.
+  std::string unsigned_hex = wally_signer_->CreateTx(
+      final_inputs, destinations, change_addr, feeSats);
+  const size_t signed_vsize =
+      wally::WallySigner::ComputeSignedVsize(unsigned_hex);
+
+  // 10) Persist (optional). When `persist` is false (draft), reconstruct a
+  // Transaction object from the unsigned hex without touching the DB.
+  Transaction tx;
+  if (persist) {
+    tx = InsertTransaction(unsigned_hex, /*height=*/-1, /*blocktime=*/0,
+                           /*fee=*/Amount(feeSats), memo, /*change_pos=*/-1);
+  } else {
+    tx = wally_signer_->GetTransactionFromTx(unsigned_hex, /*height=*/-1);
+    auto wallet = GetWallet(true, true);
+    tx.set_m(wallet.get_m());
+    tx.set_wallet_type(wallet.get_wallet_type());
+    tx.set_address_type(wallet.get_address_type());
+  }
+  tx.set_fee(Amount(feeSats));
+  tx.set_fee_rate(fee_rate);
+  tx.set_vsize(static_cast<int>(signed_vsize));
+  tx.set_status(TransactionStatus::PENDING_SIGNATURES);
+  tx.set_subtract_fee_from_amount(false);
+  tx.set_receive(false);
+  tx.set_sub_amount(0);
+  if (!memo.empty()) tx.set_memo(memo);
+  return tx;
+}
+
+Transaction NunchukWalletDb::SignLiquidTransaction(const std::string& tx_id) {
+  if (!IsSupportLiquid() || !wally_signer_) {
+    throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
+                           "Wallet is not a Liquid wallet");
+  }
+  Transaction tx = GetTransaction(tx_id);
+  const std::string unsigned_hex = tx.get_raw();
+  if (unsigned_hex.empty()) {
+    throw NunchukException(NunchukException::INVALID_PARAMETER,
+                           "No raw tx found for tx_id=" + tx_id);
+  }
+  if (wally_signer_->IsTxSigned(unsigned_hex)) {
+    return tx;  // already signed
+  }
+
+  // Rebuild prevout data from all known wallet UTXOs. SignTx will look up
+  // each input's (txid, vout) and only use what it needs; spent ones are
+  // harmless to include since GetVtxValues only returns confirmed txs.
+  std::vector<std::string> tx_hexes = GetVtxValues();
+  std::vector<wally::LiquidUtxos> inputs;
+  inputs.reserve(tx_hexes.size());
+  for (const auto& hex : tx_hexes) {
+    inputs.push_back(wally_signer_->GetUtxosFromTx(hex));
+  }
+
+  std::string signed_hex = wally_signer_->SignTx(unsigned_hex, inputs);
+
+  // Liquid txid is computed without witness, so it stays the same after
+  // signing. Update the existing row's VALUE in place.
+  UpdateTransaction(signed_hex, /*height=*/-1, /*blocktime=*/0,
+                    /*reject_msg=*/{});
+  return GetTransaction(tx_id);
+}
+
 bool NunchukWalletDb::UpdatePsbt(const std::string& psbt) {
   if (IsSupportLiquid()) {
     throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
