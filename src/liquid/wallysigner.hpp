@@ -260,7 +260,12 @@ class WallySigner {
   }
 
   std::string GetConfidentialAddress(const std::vector<uint32_t>& path) {
-    std::string address = GetAddress(path);
+    return GetConfidentialAddressFromAddress(GetAddress(path));
+  }
+
+  // Convert a segwit (non-confidential) address belonging to this wallet to
+  // its confidential address by deriving its blinding pubkey.
+  std::string GetConfidentialAddressFromAddress(const std::string& address) {
     std::vector<unsigned char> script_pubkey =
         WallyUtils::GetScriptPubkeyFromAddress(address);
     std::vector<unsigned char> private_blinding_key =

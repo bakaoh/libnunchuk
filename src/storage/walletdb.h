@@ -73,6 +73,21 @@ class NunchukWalletDb : public NunchukDb {
                          const std::map<std::string, Amount> &outputs,
                          Amount fee_rate, bool subtract_fee_from_amount,
                          const std::string &replace_tx);
+  // Build an unsigned Liquid transaction with greedy coin selection per asset.
+  // - `outputs`: per-asset map of confidential-address -> amount.
+  // - `fee_rate`: sat/kvB (Liquid default ~100 sat/kvB == 0.1 sat/vB).
+  // - `persist`: when true (default) inserts the unsigned tx into the TX table
+  //              (HEIGHT = -1) so it can be looked up by tx_id and later
+  //              signed. Drafts pass false to avoid touching the DB.
+  Transaction CreateLiquidTransaction(
+      const std::map<AssetId, std::map<std::string, Amount>> &outputs,
+      Amount fee_rate, const std::string &memo, bool persist = true);
+
+  // Sign a previously-persisted unsigned Liquid transaction in-place. Loads
+  // raw hex by tx_id, rebuilds prevout data from wallet UTXOs, signs via the
+  // injected WallySigner, and persists the signed hex (txid is unchanged on
+  // Liquid since witness data is not part of the txid hash).
+  Transaction SignLiquidTransaction(const std::string &tx_id);
   bool UpdatePsbt(const std::string &psbt);
   bool UpdatePsbtTxId(const std::string &old_id, const std::string &new_id);
   bool ReplaceTxId(const std::string &txid, const std::string &replace_txid);
