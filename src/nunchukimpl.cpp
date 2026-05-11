@@ -3322,20 +3322,25 @@ Transaction NunchukImpl::CreateLiquidTransaction(
     const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
     Amount fee_rate, const std::string& memo) {
-  // return CreateTransaction(wallet_id, outputs, memo, {}, fee_rate, false, {},
-  // false, false, {});
+  if (fee_rate <= 0) fee_rate = EstimateFee();
+  return storage_->CreateLiquidTransaction(chain_, wallet_id, outputs, fee_rate,
+                                           memo);
 }
+
 Transaction NunchukImpl::DraftLiquidTransaction(
     const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
     Amount fee_rate) {
-  // return DraftTransaction(wallet_id, outputs, {}, fee_rate, false, {}, false,
-  // false, {});
+  if (fee_rate <= 0) fee_rate = EstimateFee();
+  return storage_->DraftLiquidTransaction(chain_, wallet_id, outputs, fee_rate);
 }
+
 Transaction NunchukImpl::SignLiquidTransaction(const std::string& wallet_id,
                                                const std::string& tx_id,
-                                               const Device& device) {
-  // return SignTransaction(wallet_id, tx_id, device);
+                                               const Device& /*device*/) {
+  // Liquid wallets are software-only; the SOFTWARE signer is already wired
+  // via WallySigner inside the WalletDb, so `device` is unused.
+  return storage_->SignLiquidTransaction(chain_, wallet_id, tx_id);
 }
 
 std::unique_ptr<Nunchuk> MakeNunchuk(const AppSettings& appsettings,
