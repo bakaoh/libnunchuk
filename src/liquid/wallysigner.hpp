@@ -106,19 +106,30 @@ class WallySigner {
     return WallyUtils::HexFromBytes(fingerprint.data(), fingerprint.size());
   }
 
-  void CacheAddress(uint32_t index) {
+  std::vector<AddressDetail> CacheAddresses(const std::string& path,
+                                            uint32_t start_index,
+                                            uint32_t end_index,
+                                            bool is_change) {
     std::vector<uint32_t> keypath;
-    std::string formalized = "m/84'/1776'/0'/0/" + std::to_string(index);
+    std::string formalized = path;
     std::replace(formalized.begin(), formalized.end(), 'h', '\'');
     if (!ParseHDKeypath(formalized, keypath)) {
       throw NunchukException(NunchukException::INVALID_PARAMETER,
                              "Invalid hd keypath");
     }
-
-    std::string address = GetAddress(keypath);
-    std::vector<unsigned char> script_pubkey =
-        WallyUtils::GetScriptPubkeyFromAddress(address);
-    spk_.emplace(script_pubkey, AddressDetail{index, address});
+    keypath.push_back(is_change ? 1 : 0);
+    keypath.push_back(start_index);
+    std::vector<AddressDetail> rs{};
+    for (uint32_t index = start_index; index < end_index; index++) {
+      keypath.back() = index;
+      std::string address = GetAddress(keypath);
+      std::vector<unsigned char> script_pubkey =
+          WallyUtils::GetScriptPubkeyFromAddress(address);
+      AddressDetail detail{index, address, is_change};
+      rs.push_back(detail);
+      spk_.emplace(script_pubkey, detail);
+    }
+    return rs;
   }
 
   std::string GetAddress(const std::vector<uint32_t>& keypath) {

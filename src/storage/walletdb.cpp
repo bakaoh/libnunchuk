@@ -417,7 +417,19 @@ std::map<std::string, AddressData> NunchukWalletDb::GetAllAddressData(
         wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL));
     addresses[addr] = {addr, 0, false, false};
   } else if (wallet.get_wallet_type() == WalletType::LIQUID) {
-    // TODO: liquid addresses
+    std::string path = wallet.get_signers()[0].get_derivation_path();
+    int index = GetCurrentAddressIndex(true) + wallet.get_gap_limit();
+    auto internal_addr = wally_signer_->CacheAddresses(path, 0, index, true);
+    for (auto&& addr : internal_addr) {
+      addresses[addr.address] = {addr.address, int(addr.index), true, false};
+    }
+    SigningProviderCache::getInstance().SetMaxIndex(id_, index);
+    index = GetCurrentAddressIndex(false) + wallet.get_gap_limit();
+    auto external_addr = wally_signer_->CacheAddresses(path, 0, index, false);
+    for (auto&& addr : external_addr) {
+      addresses[addr.address] = {addr.address, int(addr.index), false, false};
+    }
+    SigningProviderCache::getInstance().SetMaxIndex(id_, index);
   } else {
     int index = 0;
     auto internal_addr = CoreUtils::getInstance().DeriveAddresses(
@@ -629,8 +641,9 @@ Transaction NunchukWalletDb::InsertTransaction(const std::string& raw_tx,
       "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '')"
       "ON CONFLICT(ID) DO UPDATE SET VALUE=excluded.VALUE, "
       "HEIGHT=excluded.HEIGHT;";
-  CMutableTransaction mtx = DecodeRawTransaction(raw_tx);
-  std::string tx_id = mtx.GetHash().GetHex();
+  std::string tx_id = IsSupportLiquid()
+                          ? wally::WallyUtils::GetTxid(raw_tx)
+                          : DecodeRawTransaction(raw_tx).GetHash().GetHex();
   sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, NULL);
   sqlite3_bind_text(stmt, 1, tx_id.c_str(), tx_id.size(), NULL);
   sqlite3_bind_text(stmt, 2, raw_tx.c_str(), raw_tx.size(), NULL);
@@ -680,7 +693,6 @@ void NunchukWalletDb::SetReplacedBy(const std::string& old_txid,
 bool NunchukWalletDb::UpdateTransaction(const std::string& raw_tx, int height,
                                         time_t blocktime,
                                         const std::string& reject_msg) {
-  // TODO: liquid update transaction
   auto wallet = GetWallet(true, true);
   if (height == -1) {
     auto tx = GetTransactionFromVtxValue(raw_tx, wallet, -1);
@@ -725,8 +737,9 @@ bool NunchukWalletDb::UpdateTransaction(const std::string& raw_tx, int height,
     return updated;
   }
 
-  CMutableTransaction mtx = DecodeRawTransaction(raw_tx);
-  std::string tx_id = mtx.GetHash().GetHex();
+  std::string tx_id = IsSupportLiquid()
+                          ? wally::WallyUtils::GetTxid(raw_tx)
+                          : DecodeRawTransaction(raw_tx).GetHash().GetHex();
 
   std::string extra = "";
   if (height <= 0) {
@@ -993,7 +1006,6 @@ std::pair<std::string, bool> NunchukWalletDb::GetPsbtOrRawTx(
 }
 
 Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
-  // TODO: liquid get transaction
   if (txs_cache_[db_file_name_].count(tx_id))
     return txs_cache_[db_file_name_][tx_id];
   auto wallet = GetWallet(true, true);
@@ -1025,10 +1037,6 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     }
     tx.set_blocktime(blocktime);
     tx.set_schedule_time(-1);
-    // Default value, will set in FillSendReceiveData
-    // TODO: Replace this asap. This code is fragile and potentially dangerous,
-    // since it relies on external assumptions (flow of outside code) that might
-    // become false
     tx.set_receive(false);
     tx.set_sub_amount(0);
 
@@ -1097,7 +1105,6 @@ std::map<AssetId, Amount> NunchukWalletDb::GetAssetBalances() {
 }
 
 std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
-  // TODO: liquid get transactions
   auto wallet = GetWallet(true, true);
 
   sqlite3_stmt* stmt;
