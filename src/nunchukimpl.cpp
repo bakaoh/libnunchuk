@@ -2215,6 +2215,7 @@ std::vector<Wallet> NunchukImpl::ParseJSONWallets(const std::string& json_str) {
 Transaction NunchukImpl::ImportRawTransaction(const std::string& wallet_id,
                                               const std::string& raw_tx,
                                               const std::string& tx_id) {
+  // TODO: liquid import raw transaction
   CMutableTransaction mtx = DecodeRawTransaction(raw_tx);
   std::string new_txid = mtx.GetHash().GetHex();
 
@@ -3324,6 +3325,26 @@ Wallet NunchukImpl::CreateLiquidWallet(const SingleSigner& signer) {
 std::map<AssetId, Amount> NunchukImpl::GetAddressAssets(
     const std::string& wallet_id, const std::string& address) {
   return storage_->GetAddressAssets(chain_, wallet_id, address);
+}
+
+Transaction NunchukImpl::CreateLiquidTransaction(
+    const std::string& wallet_id,
+    const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+    Amount fee_rate, const std::string& memo) {
+  // return CreateTransaction(wallet_id, outputs, memo, {}, fee_rate, false, {},
+  // false, false, {});
+}
+Transaction NunchukImpl::DraftLiquidTransaction(
+    const std::string& wallet_id,
+    const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+    Amount fee_rate) {
+  // return DraftTransaction(wallet_id, outputs, {}, fee_rate, false, {}, false,
+  // false, {});
+}
+Transaction NunchukImpl::SignLiquidTransaction(const std::string& wallet_id,
+                                               const std::string& tx_id,
+                                               const Device& device) {
+  // return SignTransaction(wallet_id, tx_id, device);
 }
 
 std::unique_ptr<Nunchuk> MakeNunchuk(const AppSettings& appsettings,
