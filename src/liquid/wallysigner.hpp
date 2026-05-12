@@ -22,6 +22,8 @@
 
 #include <util/bip32.h>
 #include <util/strencodings.h>
+#include <wally_psbt.h>
+#include <wally_psbt_members.h>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -943,6 +945,204 @@ class WallySigner {
     wally_free_string(out_hex);
     wally_tx_free(tx);
     return signed_hex;
+  }
+
+  // Build a base64-serialized PSET (Elements PSBT) directly from the high level
+  // transaction intent (same parameters as CreateTx) and embed the UTXO spend
+  // data needed for signing (scriptPubKey + Elements value commitment).
+  //
+  // The resulting PSET can be signed later with SignPsbt(pset_base64) without
+  // passing the LiquidUtxos again.
+  std::string CreatePsbt(const std::vector<LiquidUtxos>& inputs,
+                         const AssetDestinations& destinations,
+                         const std::string& changeConfAddr, uint64_t feeSats) {
+    // Reuse the existing tx builder to ensure identical output layout/blinding.
+    const std::string unsigned_hex =
+        CreateTx(inputs, destinations, changeConfAddr, feeSats);
+
+    struct wally_tx* tx = nullptr;
+    CHECK_WALLY(wally_tx_from_hex(unsigned_hex.c_str(), tx_flags_, &tx));
+
+    struct wally_psbt* psbt = nullptr;
+    CHECK_WALLY(wally_psbt_from_tx(tx, WALLY_PSBT_VERSION_2, WALLY_PSBT_INIT_PSET,
+                                   &psbt));
+
+    // Populate witness_utxo for each input with the prevout scriptPubKey and
+    // confidential value commitment needed for Elements signature hashing.
+    // We don't need rangeproof/nonce for signing; value_commitment is enough.
+    std::map<std::string, PrevoutSpendData> prevouts =
+        BuildPrevoutSpendDataMap(inputs);
+
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+    for (size_t vin = 0; vin < num_inputs; ++vin) {
+      std::vector<unsigned char> txhash(WALLY_TXHASH_LEN);
+      CHECK_WALLY(
+          wally_tx_get_input_txhash(tx, vin, txhash.data(), txhash.size()));
+      size_t vout_index = 0;
+      CHECK_WALLY(wally_tx_get_input_index(tx, vin, &vout_index));
+      const auto vout_u32 = static_cast<uint32_t>(vout_index);
+
+      const std::string key = MakePrevoutMapKey(txhash.data(), vout_u32);
+      auto it = prevouts.find(key);
+      if (it == prevouts.end()) {
+        wally_psbt_free(psbt);
+        wally_tx_free(tx);
+        throw std::runtime_error(
+            "CreatePsbt: no LiquidUtxos match for input vin=" +
+            std::to_string(vin));
+      }
+
+      const auto& spk = it->second.first;
+      const auto& value_commitment = it->second.second;
+      if (value_commitment.size() != ASSET_COMMITMENT_LEN) {
+        wally_psbt_free(psbt);
+        wally_tx_free(tx);
+        throw std::runtime_error(
+            "CreatePsbt: value_commitment must be 33 bytes for vin=" +
+            std::to_string(vin));
+      }
+
+      // We also set the asset commitment (generator) if we can infer it from
+      // LiquidUtxos; it's not required for signing, but keeps witness_utxo
+      // Elements-shaped.
+      std::vector<unsigned char> asset_commitment(ASSET_GENERATOR_LEN, 0);
+      bool have_asset_commitment = false;
+      for (const auto& u : inputs) {
+        if (u.tx_id.size() != WALLY_TXHASH_LEN) continue;
+        if (MakePrevoutMapKey(u.tx_id.data(), vout_u32) != key) continue;
+        for (size_t k = 0; k < u.vouts_in.size(); ++k) {
+          if (u.vouts_in[k] != vout_u32) continue;
+          const size_t off = k * ASSET_GENERATOR_LEN;
+          if (u.asset_generators_in.size() >= off + ASSET_GENERATOR_LEN) {
+            asset_commitment.assign(u.asset_generators_in.begin() + off,
+                                    u.asset_generators_in.begin() + off +
+                                        ASSET_GENERATOR_LEN);
+            have_asset_commitment = true;
+          }
+          break;
+        }
+      }
+      if (!have_asset_commitment) {
+        // Leave as zeros; Elements txout parser isn't needed for signing here.
+      }
+
+      struct wally_tx_output out{};
+      out.script = const_cast<unsigned char*>(spk.data());
+      out.script_len = spk.size();
+      out.value = const_cast<unsigned char*>(value_commitment.data());
+      out.value_len = value_commitment.size();
+      out.asset = const_cast<unsigned char*>(asset_commitment.data());
+      out.asset_len = asset_commitment.size();
+      out.nonce = nullptr;
+      out.nonce_len = 0;
+      out.surjectionproof = nullptr;
+      out.surjectionproof_len = 0;
+      out.rangeproof = nullptr;
+      out.rangeproof_len = 0;
+
+      CHECK_WALLY(wally_psbt_set_input_witness_utxo(psbt, vin, &out));
+    }
+
+    char* out_b64 = nullptr;
+    CHECK_WALLY(wally_psbt_to_base64(psbt, 0, &out_b64));
+    std::string b64(out_b64);
+    wally_free_string(out_b64);
+    wally_psbt_free(psbt);
+    wally_tx_free(tx);
+    return b64;
+  }
+
+  // Sign a base64-serialized PSET using spend data embedded in each input's
+  // witness_utxo (scriptPubKey + value commitment). This is the preferred
+  // flow when the PSET was created by CreatePsbt(inputs, ...).
+  std::string SignPsbt(const std::string& pset_base64) {
+    struct wally_psbt* psbt = nullptr;
+    CHECK_WALLY(wally_psbt_from_base64(pset_base64.c_str(),
+                                       WALLY_PSBT_PARSE_FLAG_STRICT, &psbt));
+    if (psbt == nullptr) {
+      throw std::runtime_error("SignPsbt: invalid PSBT (null)");
+    }
+
+    struct wally_tx* tx = nullptr;
+    CHECK_WALLY(wally_psbt_extract(psbt, WALLY_PSBT_EXTRACT_NON_FINAL, &tx));
+    if (tx == nullptr) {
+      wally_psbt_free(psbt);
+      throw std::runtime_error("SignPsbt: could not extract non-final tx");
+    }
+
+    size_t num_inputs = 0;
+    CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
+
+    size_t psbt_inputs = 0;
+    CHECK_WALLY(wally_psbt_get_num_inputs(psbt, &psbt_inputs));
+    if (psbt_inputs != num_inputs) {
+      wally_tx_free(tx);
+      wally_psbt_free(psbt);
+      throw std::runtime_error("SignPsbt: psbt inputs mismatch with tx inputs");
+    }
+
+    std::vector<std::vector<unsigned char>> script_pubkeys_in;
+    std::vector<std::vector<unsigned char>> value_commitments_in;
+    script_pubkeys_in.reserve(num_inputs);
+    value_commitments_in.reserve(num_inputs);
+
+    for (size_t vin = 0; vin < num_inputs; ++vin) {
+      struct wally_tx_output* wit_utxo = nullptr;
+      CHECK_WALLY(wally_psbt_get_input_witness_utxo_alloc(psbt, vin, &wit_utxo));
+      if (wit_utxo == nullptr || wit_utxo->script == nullptr ||
+          wit_utxo->value == nullptr) {
+        if (wit_utxo) wally_tx_output_free(wit_utxo);
+        wally_tx_free(tx);
+        wally_psbt_free(psbt);
+        throw std::runtime_error(
+            "SignPsbt: missing witness_utxo/script/value for vin=" +
+            std::to_string(vin) +
+            " (create the PSET with CreatePsbt(inputs, ...) or provide spend data)");
+      }
+      std::vector<unsigned char> spk(wit_utxo->script,
+                                     wit_utxo->script + wit_utxo->script_len);
+      std::vector<unsigned char> vc(wit_utxo->value,
+                                    wit_utxo->value + wit_utxo->value_len);
+      wally_tx_output_free(wit_utxo);
+
+      if (vc.size() != ASSET_COMMITMENT_LEN) {
+        wally_tx_free(tx);
+        wally_psbt_free(psbt);
+        throw std::runtime_error(
+            "SignPsbt: witness_utxo value must be 33-byte Elements commitment for vin=" +
+            std::to_string(vin));
+      }
+      script_pubkeys_in.push_back(std::move(spk));
+      value_commitments_in.push_back(std::move(vc));
+    }
+
+    SignTxInPlace(tx, script_pubkeys_in, value_commitments_in);
+
+    for (size_t vin = 0; vin < num_inputs; ++vin) {
+      const auto* wit = tx->inputs[vin].witness;
+      if (!wit) {
+        wally_tx_free(tx);
+        wally_psbt_free(psbt);
+        throw std::runtime_error(
+            "SignPsbt: missing witness after signing at vin=" +
+            std::to_string(vin));
+      }
+      struct wally_tx_witness_stack* wit_clone = nullptr;
+      CHECK_WALLY(wally_tx_witness_stack_clone_alloc(wit, &wit_clone));
+      CHECK_WALLY(wally_psbt_set_input_final_witness(psbt, vin, wit_clone));
+      wally_tx_witness_stack_free(wit_clone);
+    }
+    wally_tx_free(tx);
+
+    CHECK_WALLY(wally_psbt_finalize(psbt, 0));
+
+    char* out_b64 = nullptr;
+    CHECK_WALLY(wally_psbt_to_base64(psbt, 0, &out_b64));
+    std::string signed_b64(out_b64);
+    wally_free_string(out_b64);
+    wally_psbt_free(psbt);
+    return signed_b64;
   }
 
   // P2WPKH witness weight units, per signed input:
