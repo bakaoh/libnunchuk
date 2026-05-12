@@ -22,8 +22,10 @@
 #include <key_io.h>
 #include <validation.h>
 #include <algorithm>
+#include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <thread>
 #include "bbqr/bbqr.hpp"
 #include "descriptor.h"
 #include "utils/chain.hpp"
@@ -460,6 +462,38 @@ void NunchukImpl::ScanWalletAddress(const std::string& wallet_id, bool force,
 void NunchukImpl::RunScanWalletAddress(const std::string& wallet_id,
                                        bool from_start) {
   auto wallet = GetWallet(wallet_id);
+  if (wallet.get_wallet_type() == WalletType::LIQUID) {
+    // Liquid wallets don't expose a Bitcoin Core descriptor, so we cannot
+    // reuse the descriptor-derive path below. Derive the gap-limit window
+    // through the wallet's cached WallySigner (via storage_->GetAllAddresses)
+    // and subscribe each address with the synchronizer. LookAhead is a no-op
+    // for addresses without history; addresses that do have history are
+    // persisted into the AddressTable as a side effect.
+    auto addrs = storage_->GetAllAddresses(chain_, wallet_id);
+    // ScanWalletAddress runs asynchronously; LookAhead short-circuits while
+    // the synchronizer is still CONNECTING. Poll briefly until the first
+    // address subscribes successfully (or until we give up) so newly created
+    // Liquid wallets actually surface their on-chain history.
+    int index = 0;
+    constexpr int kMaxAttempts = 30;  // ~30s total
+    for (const auto& a : addrs) {
+      bool ok = false;
+      for (int attempt = 0; attempt < kMaxAttempts && !ok; ++attempt) {
+        try {
+          ok = synchronizer_->LookAhead(chain_, wallet_id, a, index,
+                                        /*internal=*/false);
+        } catch (...) {
+          // Best-effort: keep walking on transient backend errors.
+          break;
+        }
+        if (!ok) {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+      }
+      ++index;
+    }
+    return;
+  }
   int index = -1;
   std::string address;
   if (wallet.is_escrow()) {

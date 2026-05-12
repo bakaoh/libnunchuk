@@ -62,6 +62,29 @@ std::map<std::string, std::map<std::string, Transaction>>
 void NunchukWalletDb::SetWallySigner(
     std::shared_ptr<wally::WallySigner> signer) {
   wally_signer_ = std::move(signer);
+  if (!wally_signer_ || !IsSupportLiquid()) return;
+  // The new signer instance starts with an empty script-pubkey cache. Re-derive
+  // the wallet's external/internal addresses up to the current index plus the
+  // gap limit so it can recognize wallet outputs immediately. We skip the
+  // signing-provider path (skip_provider=true) to avoid recursing back into
+  // GetAllAddressData which can short-circuit on the static cache.
+  try {
+    auto wallet = GetWallet(/*skip_balance=*/true, /*skip_provider=*/true);
+    if (wallet.get_wallet_type() != WalletType::LIQUID) return;
+    const std::string path = wallet.get_signers()[0].get_derivation_path();
+    const int gap = wallet.get_gap_limit();
+    int internal_end = GetCurrentAddressIndex(true) + gap;
+    int external_end = GetCurrentAddressIndex(false) + gap;
+    if (internal_end > 0) {
+      wally_signer_->CacheAddresses(path, 0, internal_end, /*is_change=*/true);
+    }
+    if (external_end > 0) {
+      wally_signer_->CacheAddresses(path, 0, external_end, /*is_change=*/false);
+    }
+  } catch (...) {
+    // Best-effort: callers that need addresses will trigger GetAllAddressData
+    // which can still populate the cache lazily.
+  }
 }
 
 void NunchukWalletDb::InitWallet(const Wallet& wallet) {
@@ -951,14 +974,34 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
   }
   if (!targets.count(LBTC)) targets[LBTC] = 0;  // still needed to pay fee
 
-  // 5) Change address: pick an unused internal confidential address.
-  auto unused_internal = GetAddresses(/*used=*/false, /*internal=*/true);
-  if (unused_internal.empty()) {
-    throw NunchukException(NunchukException::INVALID_ADDRESS,
-                           "No unused internal Liquid address for change");
+  // 5) Change address: prefer an unused internal address already tracked by
+  // the wallet; otherwise derive a fresh one via the WallySigner. The
+  // fallback handles Liquid wallets whose AddressTable was never populated by
+  // a sync (e.g. offline tests, playgrounds) and is also a robust last resort
+  // for wallets that ran out of unused internal addresses.
+  std::string change_seg_addr;
+  {
+    auto unused_internal = GetAddresses(/*used=*/false, /*internal=*/true);
+    if (!unused_internal.empty()) {
+      change_seg_addr = unused_internal.front();
+    } else {
+      auto wallet_dto = GetWallet(/*skip_balance=*/true, /*skip_provider=*/true);
+      const std::string path = wallet_dto.get_signers()[0].get_derivation_path();
+      int idx = GetCurrentAddressIndex(/*internal=*/true) + 1;
+      if (idx < 0) idx = 0;
+      auto fresh = wally_signer_->CacheAddresses(path, static_cast<uint32_t>(idx),
+                                                 static_cast<uint32_t>(idx + 1),
+                                                 /*is_change=*/true);
+      if (fresh.empty()) {
+        throw NunchukException(
+            NunchukException::INVALID_ADDRESS,
+            "Failed to derive a fresh internal Liquid change address");
+      }
+      change_seg_addr = fresh.front().address;
+    }
   }
   std::string change_addr =
-      wally_signer_->GetConfidentialAddressFromAddress(unused_internal.front());
+      wally_signer_->GetConfidentialAddressFromAddress(change_seg_addr);
 
   // 6) Helpers.
   auto select_for_asset =
