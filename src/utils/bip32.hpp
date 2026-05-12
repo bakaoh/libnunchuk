@@ -197,14 +197,21 @@ inline std::string GetBip32Type(const nunchuk::WalletType& wallet_type,
 inline int GetIndexFromPath(const nunchuk::WalletType& wallet_type,
                             const nunchuk::AddressType& address_type,
                             const std::string& path) {
-  if (wallet_type == nunchuk::WalletType::MULTI_SIG ||
-      wallet_type == nunchuk::WalletType::MINISCRIPT) {
-    if (address_type == nunchuk::AddressType::LEGACY) return 0;
-    if (path.size() <= 9) return 0;
-    return std::stoi(path.substr(9, path.size() - 3));
+  try {
+    if (wallet_type == nunchuk::WalletType::MULTI_SIG ||
+        wallet_type == nunchuk::WalletType::MINISCRIPT) {
+      if (address_type == nunchuk::AddressType::LEGACY) return 0;
+      if (path.size() <= 9) return 0;
+      return std::stoi(path.substr(9, path.size() - 3));
+    }
+    std::size_t last = path.find_last_of("/");
+    if (last == std::string::npos) return -1;  // root or non-standard path
+    return std::stoi(path.substr(last + 1));
+  } catch (const std::exception&) {
+    // Path doesn't have a numeric trailing component (e.g. "m", "m/0'/foo");
+    // treat it as a custom path so callers fall back to the "custom" branch.
+    return -1;
   }
-  std::size_t last = path.find_last_of("/");
-  return std::stoi(path.substr(last + 1));
 }
 
 inline int GetIndexFromPath(const std::string& path) {
