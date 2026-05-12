@@ -415,26 +415,35 @@ NunchukWalletDb NunchukStorage::GetWalletDb(Chain chain,
     throw StorageException(StorageException::WALLET_NOT_FOUND,
                            strprintf("Wallet doesn't exist! id = '%s'", id));
   }
-  return NunchukWalletDb{chain, id, db_file.string(), passphrase_};
+  NunchukWalletDb wallet_db{chain, id, db_file.string(), passphrase_};
+  // For Liquid wallets, eagerly inject the WallySigner so that every
+  // walletdb-touching method (address derivation, transaction parsing, ...)
+  // has access to it. Best-effort: skip silently if the signer DB isn't
+  // available yet (e.g. orphaned wallet, recovery flow).
+  if (wallet_db.IsSupportLiquid()) {
+    auto signers = wallet_db.GetSigners();
+    if (!signers.empty()) {
+      try {
+        const std::string mid =
+            ba::to_lower_copy(signers.front().get_master_signer_id());
+        auto signer_db = GetSignerDb(chain, mid);
+        std::string signer_passphrase =
+            signer_passphrase_.count(mid) ? signer_passphrase_.at(mid) : "";
+        auto wally_signer = signer_db.GetWallySigner(signer_passphrase);
+        wallet_db.SetWallySigner(
+            std::make_shared<wally::WallySigner>(std::move(wally_signer)));
+      } catch (...) {
+        // Leave wally_signer_ unset; downstream Liquid-aware code paths will
+        // throw if they truly need it.
+      }
+    }
+  }
+  return wallet_db;
 }
 
 NunchukWalletDb NunchukStorage::GetLiquidSupportedWalletDb(
     Chain chain, const std::string& id) {
-  auto wallet_db = GetWalletDb(chain, id);
-  if (wallet_db.IsSupportLiquid()) {
-    auto signers = wallet_db.GetSigners();
-    if (!signers.empty()) {
-      const std::string mid =
-          ba::to_lower_copy(signers.front().get_master_signer_id());
-      auto signer_db = GetSignerDb(chain, mid);
-      std::string signer_passphrase =
-          signer_passphrase_.count(mid) ? signer_passphrase_.at(mid) : "";
-      auto wally_signer = signer_db.GetWallySigner(signer_passphrase);
-      wallet_db.SetWallySigner(
-          std::make_shared<wally::WallySigner>(std::move(wally_signer)));
-    }
-  }
-  return wallet_db;
+  return GetWalletDb(chain, id);
 }
 
 NunchukSignerDb NunchukStorage::GetSignerDb(Chain chain,
@@ -1226,7 +1235,7 @@ Transaction NunchukStorage::InsertTransaction(
     int height, time_t blocktime, Amount fee, const std::string& memo,
     int change_pos) {
   std::unique_lock<std::shared_mutex> lock(access_);
-  auto db = GetWalletDb(chain, wallet_id);
+  auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
   auto tx =
       db.InsertTransaction(raw_tx, height, blocktime, fee, memo, change_pos);
   db.FillSendReceiveData(tx);
