@@ -33,6 +33,7 @@ class ElectrumSynchronizer : public Synchronizer {
   ~ElectrumSynchronizer();
 
   void Broadcast(const std::string& raw_tx) override;
+  void BroadcastLiquidTransaction(const std::string& raw_tx) override;
   Amount EstimateFee(int conf_target) override;
   time_t GetMedianTimePast() override;
   Amount RelayFee() override;
