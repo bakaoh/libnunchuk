@@ -460,6 +460,19 @@ void ElectrumSynchronizer::Broadcast(const std::string& raw_tx) {
   client_->blockchain_transaction_broadcast(raw_tx);
 }
 
+void ElectrumSynchronizer::BroadcastLiquidTransaction(const std::string& raw_tx) {
+  std::unique_lock<std::mutex> lock_(status_mutex_);
+  if (status_ != Status::READY && status_ != Status::SYNCING) {
+    throw NunchukException(NunchukException::SERVER_REQUEST_ERROR,
+                           "Disconnected");
+  }
+  if (!liquid_client_) {
+    throw NunchukException(NunchukException::SERVER_REQUEST_ERROR,
+                           "Liquid client not configured");
+  }
+  liquid_client_->blockchain_transaction_broadcast(raw_tx);
+}
+
 Amount ElectrumSynchronizer::EstimateFee(int conf_target) {
   std::unique_lock<std::mutex> lock_(status_mutex_);
   if (status_ != Status::READY && status_ != Status::SYNCING) {
