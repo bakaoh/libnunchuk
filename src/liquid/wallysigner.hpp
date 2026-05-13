@@ -523,9 +523,9 @@ class WallySigner {
   // Note: this only checks witness presence, not signature validity. It also
   // assumes a witness-based script type (P2WPKH/P2WSH). A legacy P2PKH input
   // would put its signature in scriptSig, which this check does not consider.
-  bool IsTxSigned(const std::string& tx_hex) {
+  static bool IsTxSigned(const std::string& tx_hex) {
     struct wally_tx* tx = nullptr;
-    CHECK_WALLY(wally_tx_from_hex(tx_hex.c_str(), tx_flags_, &tx));
+    CHECK_WALLY(wally_tx_from_hex(tx_hex.c_str(), WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS, &tx));
 
     size_t num_inputs = 0;
     CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));

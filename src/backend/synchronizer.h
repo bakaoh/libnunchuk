@@ -53,6 +53,9 @@ class Synchronizer {
                                TransactionStatus status);
 
   virtual void Broadcast(const std::string& raw_tx) = 0;
+  virtual void BroadcastLiquidTransaction(const std::string& raw_tx) {
+    Broadcast(raw_tx);
+  }
   virtual Amount EstimateFee(int conf_target) = 0;
   virtual time_t GetMedianTimePast() = 0;
   virtual Amount RelayFee() = 0;

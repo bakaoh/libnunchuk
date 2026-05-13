@@ -34,6 +34,7 @@
 #include <utils/bip32.hpp>
 #include <utils/txutils.hpp>
 #include <utils/addressutils.hpp>
+#include <liquid/wallysigner.hpp>
 #include <utils/silentpayment.hpp>
 #include <script/signingprovider.h>
 #include <utils/json.hpp>
@@ -1533,9 +1534,31 @@ std::string NunchukImpl::GetSignerAddress(const SingleSigner& signer,
 Transaction NunchukImpl::BroadcastTransaction(const std::string& wallet_id,
                                               const std::string& tx_id) {
   std::string raw_tx = GetRawTransaction(wallet_id, tx_id);
+  std::string reject_msg{};
+
+  auto wallet = GetWallet(wallet_id);
+  if (wallet.get_wallet_type() == WalletType::LIQUID) {
+    if (!wally::WallySigner::IsTxSigned(raw_tx)) {
+      throw NunchukException(NunchukException::INVALID_PARAMETER,
+                             "Transaction is not signed");
+    }
+    try {
+      synchronizer_->BroadcastLiquidTransaction(raw_tx);
+    } catch (NunchukException& ne) {
+      if (ne.code() != NunchukException::NETWORK_REJECTED) throw;
+      reject_msg = ne.what();
+    }
+    if (reject_msg.empty()) {
+      storage_->UpdateTransaction(chain_, wallet_id, raw_tx, 0, 0);
+    } else {
+      time_t t = std::time(0);
+      storage_->UpdateTransaction(chain_, wallet_id, raw_tx, -2, t, reject_msg);
+    }
+    return GetTransaction(wallet_id, tx_id);
+  }
+
   auto tx = DecodeRawTransaction(raw_tx);
   std::string new_txid = tx.GetHash().GetHex();
-  std::string reject_msg{};
 
   if (GetTransactionWeight(CTransaction(tx)) > MAX_STANDARD_TX_WEIGHT) {
     reject_msg = "Tx-size";
