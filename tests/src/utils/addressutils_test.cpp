@@ -16,6 +16,7 @@
  */
 
 #include <nunchuk.h>
+#include <liquid/wallyutils.hpp>
 #include <utils/addressutils.hpp>
 
 #include <doctest.h>
@@ -39,4 +40,16 @@ TEST_CASE("testing addressutils") {
         "a914b7f868d832799c75ff39a617c623cee9d2ea42e987");
   CHECK(AddressToScriptHash("2NA1yEBoC92mDxR57gUGmxFC6dtk9qPLFmr") ==
         "3ccd5a9eea69cd2728b0bf1fe1a32955a3c4f5ed663fda597505450f58de2493");
+}
+
+TEST_CASE("Liquid confidential and unconfidential share Electrum scripthash") {
+  nunchuk::wally::WallyUtils::Init();
+  nunchuk::Utils::SetChain(nunchuk::Chain::MAIN);
+  // libwally-core test_confidential_addr_segwit.py (Liquid main P2WPKH pair)
+  const char* unconf = "ex1qm39086s5kpvjvg23fc4afg8qs0rl4shj76t00e";
+  const char* conf =
+      "lq1qqw3e3mk4ng3ks43mh54udznuekaadh9lgwef3mwgzrfzakmdwcvqphz2704pfvz"
+      "eycs4zn3t6jswpq78ltp0yxz3p90nf3npx";
+  CHECK(AddressToScriptHash(unconf) == AddressToScriptHash(conf));
+  nunchuk::wally::WallyUtils::Cleanup();
 }
