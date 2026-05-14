@@ -85,6 +85,11 @@ class NunchukStorage {
                    bool create_signers_if_not_exist = false,
                    bool fill_extra = true, bool skip_balance = false);
   bool IsSupportLiquid(Chain chain, const std::string &wallet_id);
+  // Liquid only: shared WallySigner injected when opening the wallet DB
+  // (mnemonic from the wallet's primary software signer). Null if not Liquid,
+  // signer unavailable, or injection failed.
+  std::shared_ptr<wally::WallySigner> GetWallySignerForWallet(
+      Chain chain, const std::string &wallet_id);
   bool HasWallet(Chain chain, const std::string &wallet_id);
   MasterSigner GetMasterSigner(Chain chain, const std::string &id);
   SoftwareSigner GetSoftwareSigner(Chain chain, const std::string &id);

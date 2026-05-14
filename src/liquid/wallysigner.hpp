@@ -238,11 +238,10 @@ class WallySigner {
     for (uint32_t index = start_index; index < end_index; index++) {
       keypath.back() = index;
       std::string address = GetAddress(keypath);
-      std::vector<unsigned char> script_pubkey =
-          WallyUtils::GetScriptPubkeyFromAddress(address);
-      AddressDetail detail{index, address, is_change};
+      std::string confidential_address = GetConfidentialAddressFromAddress(address);
+      AddressDetail detail{index, confidential_address, is_change};
       rs.push_back(detail);
-      spk_.emplace(script_pubkey, detail);
+      spk_.emplace(WallyUtils::GetScriptPubkeyFromAddress(address), detail);
     }
     return rs;
   }
@@ -525,7 +524,9 @@ class WallySigner {
   // would put its signature in scriptSig, which this check does not consider.
   static bool IsTxSigned(const std::string& tx_hex) {
     struct wally_tx* tx = nullptr;
-    CHECK_WALLY(wally_tx_from_hex(tx_hex.c_str(), WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS, &tx));
+    CHECK_WALLY(wally_tx_from_hex(
+        tx_hex.c_str(), WALLY_TX_FLAG_USE_ELEMENTS | WALLY_TX_FLAG_USE_WITNESS,
+        &tx));
 
     size_t num_inputs = 0;
     CHECK_WALLY(wally_tx_get_num_inputs(tx, &num_inputs));
@@ -547,8 +548,7 @@ class WallySigner {
     return all_signed;
   }
 
-  using AssetDestinations =
-      std::map<AssetId, std::map<std::string, Amount>>;
+  using AssetDestinations = std::map<AssetId, std::map<std::string, Amount>>;
 
   // Build and blind a Liquid transaction; returns unsigned hex (no witness
   // signatures). Use SignTx(hex, inputs) when ready to sign.
@@ -576,13 +576,13 @@ class WallySigner {
 
     // Per-input view derived from inputs[].
     struct InputInfo {
-      std::vector<unsigned char> tx_id;            // 32
+      std::vector<unsigned char> tx_id;  // 32
       uint32_t vout;
-      std::vector<unsigned char> asset_id;         // 32
-      std::vector<unsigned char> asset_gen;        // ASSET_GENERATOR_LEN (33)
+      std::vector<unsigned char> asset_id;   // 32
+      std::vector<unsigned char> asset_gen;  // ASSET_GENERATOR_LEN (33)
       uint64_t value;
-      std::vector<unsigned char> abf;              // 32
-      std::vector<unsigned char> vbf;              // 32
+      std::vector<unsigned char> abf;  // 32
+      std::vector<unsigned char> vbf;  // 32
     };
     std::vector<InputInfo> all_inputs;
 
@@ -802,21 +802,22 @@ class WallySigner {
     }
 
     struct wally_tx* output_tx = nullptr;
-    CHECK_WALLY(wally_tx_init_alloc(2, 0, all_inputs.size(), outs.size(),
-                                    &output_tx));
+    CHECK_WALLY(
+        wally_tx_init_alloc(2, 0, all_inputs.size(), outs.size(), &output_tx));
 
     for (const auto& o : outs) {
       if (o.explicit_fee) {
         std::vector<unsigned char> fee_asset(1 + 32);
         fee_asset[0] = 0x01;
         std::memcpy(fee_asset.data() + 1, o.asset_id.data(), 32);
-        std::vector<unsigned char> fee_value(WALLY_TX_ASSET_CT_VALUE_UNBLIND_LEN);
+        std::vector<unsigned char> fee_value(
+            WALLY_TX_ASSET_CT_VALUE_UNBLIND_LEN);
         CHECK_WALLY(wally_tx_confidential_value_from_satoshi(
             o.value, fee_value.data(), fee_value.size()));
         CHECK_WALLY(wally_tx_add_elements_raw_output(
             output_tx, nullptr, 0, fee_asset.data(), fee_asset.size(),
-            fee_value.data(), fee_value.size(), nullptr, 0, nullptr, 0,
-            nullptr, 0, 0));
+            fee_value.data(), fee_value.size(), nullptr, 0, nullptr, 0, nullptr,
+            0, 0));
         continue;
       }
 
@@ -874,16 +875,16 @@ class WallySigner {
     for (const auto& ii : all_inputs) {
       CHECK_WALLY(wally_tx_add_elements_raw_input(
           output_tx, ii.tx_id.data(), ii.tx_id.size(), ii.vout, 0xffffffff,
-          nullptr, 0,    // script + script_len
-          nullptr,       // witness
-          nullptr, 0,    // nonce + nonce_len
-          nullptr, 0,    // entropy + entropy_len
-          nullptr, 0,    // issuance_amount + issuance_amount_len
-          nullptr, 0,    // inflation_keys + inflation_keys_len
-          nullptr, 0,    // issuance_amount_rangeproof + len
-          nullptr, 0,    // inflation_keys_rangeproof + len
-          nullptr,       // pegin_witness
-          0));           // flags
+          nullptr, 0,  // script + script_len
+          nullptr,     // witness
+          nullptr, 0,  // nonce + nonce_len
+          nullptr, 0,  // entropy + entropy_len
+          nullptr, 0,  // issuance_amount + issuance_amount_len
+          nullptr, 0,  // inflation_keys + inflation_keys_len
+          nullptr, 0,  // issuance_amount_rangeproof + len
+          nullptr, 0,  // inflation_keys_rangeproof + len
+          nullptr,     // pegin_witness
+          0));         // flags
     }
 
     char* txhex = nullptr;
@@ -964,8 +965,8 @@ class WallySigner {
     CHECK_WALLY(wally_tx_from_hex(unsigned_hex.c_str(), tx_flags_, &tx));
 
     struct wally_psbt* psbt = nullptr;
-    CHECK_WALLY(wally_psbt_from_tx(tx, WALLY_PSBT_VERSION_2, WALLY_PSBT_INIT_PSET,
-                                   &psbt));
+    CHECK_WALLY(wally_psbt_from_tx(tx, WALLY_PSBT_VERSION_2,
+                                   WALLY_PSBT_INIT_PSET, &psbt));
 
     // Populate witness_utxo for each input with the prevout scriptPubKey and
     // confidential value commitment needed for Elements signature hashing.
@@ -1015,9 +1016,9 @@ class WallySigner {
           if (u.vouts_in[k] != vout_u32) continue;
           const size_t off = k * ASSET_GENERATOR_LEN;
           if (u.asset_generators_in.size() >= off + ASSET_GENERATOR_LEN) {
-            asset_commitment.assign(u.asset_generators_in.begin() + off,
-                                    u.asset_generators_in.begin() + off +
-                                        ASSET_GENERATOR_LEN);
+            asset_commitment.assign(
+                u.asset_generators_in.begin() + off,
+                u.asset_generators_in.begin() + off + ASSET_GENERATOR_LEN);
             have_asset_commitment = true;
           }
           break;
@@ -1089,7 +1090,8 @@ class WallySigner {
 
     for (size_t vin = 0; vin < num_inputs; ++vin) {
       struct wally_tx_output* wit_utxo = nullptr;
-      CHECK_WALLY(wally_psbt_get_input_witness_utxo_alloc(psbt, vin, &wit_utxo));
+      CHECK_WALLY(
+          wally_psbt_get_input_witness_utxo_alloc(psbt, vin, &wit_utxo));
       if (wit_utxo == nullptr || wit_utxo->script == nullptr ||
           wit_utxo->value == nullptr) {
         if (wit_utxo) wally_tx_output_free(wit_utxo);
@@ -1098,7 +1100,8 @@ class WallySigner {
         throw std::runtime_error(
             "SignPsbt: missing witness_utxo/script/value for vin=" +
             std::to_string(vin) +
-            " (create the PSET with CreatePsbt(inputs, ...) or provide spend data)");
+            " (create the PSET with CreatePsbt(inputs, ...) or provide spend "
+            "data)");
       }
       std::vector<unsigned char> spk(wit_utxo->script,
                                      wit_utxo->script + wit_utxo->script_len);
@@ -1110,7 +1113,8 @@ class WallySigner {
         wally_tx_free(tx);
         wally_psbt_free(psbt);
         throw std::runtime_error(
-            "SignPsbt: witness_utxo value must be 33-byte Elements commitment for vin=" +
+            "SignPsbt: witness_utxo value must be 33-byte Elements commitment "
+            "for vin=" +
             std::to_string(vin));
       }
       script_pubkeys_in.push_back(std::move(spk));
@@ -1184,7 +1188,8 @@ class WallySigner {
 
   // Fee from virtual size and feerate in sat/kvB (satoshis per 1000 vbytes).
   // Liquid defaults are often quoted as e.g. 0.1 sat/vB (= 100 sat/kvB).
-  // Uses ceiling integer math so small txs still pay at least the proportional fee.
+  // Uses ceiling integer math so small txs still pay at least the proportional
+  // fee.
   static uint64_t FeeSatsFromVsizeAndKvBRate(size_t vsize,
                                              uint64_t fee_rate_sat_per_kvb) {
     return (static_cast<uint64_t>(vsize) * fee_rate_sat_per_kvb + 999) / 1000;
@@ -1198,11 +1203,11 @@ class WallySigner {
   // it would add or remove a change output (e.g. when LBTC inputs ≈ feeSats).
   // Pass an approximate target fee if your situation is on that boundary;
   // for typical wallets the default of 1 sat is fine.
-  size_t EstimateSignedVsize(
-      const std::vector<LiquidUtxos>& inputs,
-      const AssetDestinations& destinations,
-      const std::string& changeConfAddr, uint64_t feeSatsHint = 1,
-      size_t witness_wu_per_input = kP2WPKHWitnessWU) {
+  size_t EstimateSignedVsize(const std::vector<LiquidUtxos>& inputs,
+                             const AssetDestinations& destinations,
+                             const std::string& changeConfAddr,
+                             uint64_t feeSatsHint = 1,
+                             size_t witness_wu_per_input = kP2WPKHWitnessWU) {
     const std::string placeholder_hex =
         CreateTx(inputs, destinations, changeConfAddr, feeSatsHint);
     return ComputeSignedVsize(placeholder_hex, witness_wu_per_input);
@@ -1213,12 +1218,11 @@ class WallySigner {
   uint64_t EstimateFee(const std::vector<LiquidUtxos>& inputs,
                        const AssetDestinations& destinations,
                        const std::string& changeConfAddr,
-                       uint64_t fee_rate_sat_per_kvb,
-                       uint64_t feeSatsHint = 1,
+                       uint64_t fee_rate_sat_per_kvb, uint64_t feeSatsHint = 1,
                        size_t witness_wu_per_input = kP2WPKHWitnessWU) {
-    const size_t vsize = EstimateSignedVsize(inputs, destinations,
-                                             changeConfAddr, feeSatsHint,
-                                             witness_wu_per_input);
+    const size_t vsize =
+        EstimateSignedVsize(inputs, destinations, changeConfAddr, feeSatsHint,
+                            witness_wu_per_input);
     return FeeSatsFromVsizeAndKvBRate(vsize, fee_rate_sat_per_kvb);
   }
 };

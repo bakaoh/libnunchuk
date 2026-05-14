@@ -463,38 +463,6 @@ void NunchukImpl::ScanWalletAddress(const std::string& wallet_id, bool force,
 void NunchukImpl::RunScanWalletAddress(const std::string& wallet_id,
                                        bool from_start) {
   auto wallet = GetWallet(wallet_id);
-  if (wallet.get_wallet_type() == WalletType::LIQUID) {
-    // Liquid wallets don't expose a Bitcoin Core descriptor, so we cannot
-    // reuse the descriptor-derive path below. Derive the gap-limit window
-    // through the wallet's cached WallySigner (via storage_->GetAllAddresses)
-    // and subscribe each address with the synchronizer. LookAhead is a no-op
-    // for addresses without history; addresses that do have history are
-    // persisted into the AddressTable as a side effect.
-    auto addrs = storage_->GetAllAddresses(chain_, wallet_id);
-    // ScanWalletAddress runs asynchronously; LookAhead short-circuits while
-    // the synchronizer is still CONNECTING. Poll briefly until the first
-    // address subscribes successfully (or until we give up) so newly created
-    // Liquid wallets actually surface their on-chain history.
-    int index = 0;
-    constexpr int kMaxAttempts = 30;  // ~30s total
-    for (const auto& a : addrs) {
-      bool ok = false;
-      for (int attempt = 0; attempt < kMaxAttempts && !ok; ++attempt) {
-        try {
-          ok = synchronizer_->LookAhead(chain_, wallet_id, a, index,
-                                        /*internal=*/false);
-        } catch (...) {
-          // Best-effort: keep walking on transient backend errors.
-          break;
-        }
-        if (!ok) {
-          std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-      }
-      ++index;
-    }
-    return;
-  }
   int index = -1;
   std::string address;
   if (wallet.is_escrow()) {
@@ -523,24 +491,32 @@ void NunchukImpl::RunScanWalletAddress(const std::string& wallet_id,
 
 std::string NunchukImpl::GetUnusedAddress(const Wallet& wallet, int& index,
                                           bool internal) {
-  auto descriptor = wallet.get_descriptor(
-      internal ? DescriptorPath::INTERNAL_ALL : DescriptorPath::EXTERNAL_ALL);
-  std::string wallet_id = wallet.get_id();
+  const std::string wallet_id = wallet.get_id();
+  std::string descriptor;
+  std::shared_ptr<wally::WallySigner> signer;
+  std::string path;
+  if (wallet.get_wallet_type() != WalletType::LIQUID) {
+    descriptor = wallet.get_descriptor(
+        internal ? DescriptorPath::INTERNAL_ALL : DescriptorPath::EXTERNAL_ALL);
+  } else {
+    signer = storage_->GetWallySignerForWallet(chain_, wallet_id);
+    path = wallet.get_signers()[0].get_derivation_path();
+  }
+
   if (synchronizer_->SupportBatchLookAhead()) {
     int lastUsedIndex = index - 1;
     while (true) {
       std::vector<std::string> addresses;
       std::vector<int> indexes;
       for (int i = index; i < index + wallet.get_gap_limit(); i++) {
-        addresses.push_back(
-            CoreUtils::getInstance().DeriveAddress(descriptor, i));
+        addresses.push_back(DeriveAddress(descriptor, signer, path, i, internal));
         indexes.push_back(i);
       }
       int last = synchronizer_->BatchLookAhead(chain_, wallet_id, addresses,
                                                indexes, internal);
       if (last == -1) {
         index = lastUsedIndex + 1;
-        return CoreUtils::getInstance().DeriveAddress(descriptor, index);
+        return DeriveAddress(descriptor, signer, path, index, internal);
       }
       lastUsedIndex = index + last;
       index = index + wallet.get_gap_limit();
@@ -551,7 +527,7 @@ std::string NunchukImpl::GetUnusedAddress(const Wallet& wallet, int& index,
   std::vector<std::string> unused_addresses;
   std::map<std::string, int> addresses_index;
   while (true) {
-    auto address = CoreUtils::getInstance().DeriveAddress(descriptor, index);
+    auto address = DeriveAddress(descriptor, signer, path, index, internal);
     addresses_index[address] = index;
     if (synchronizer_->LookAhead(chain_, wallet_id, address, index, internal)) {
       for (auto&& a : unused_addresses) {
