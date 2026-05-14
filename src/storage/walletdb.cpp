@@ -979,11 +979,11 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
   // fallback handles Liquid wallets whose AddressTable was never populated by
   // a sync (e.g. offline tests, playgrounds) and is also a robust last resort
   // for wallets that ran out of unused internal addresses.
-  std::string change_seg_addr;
+  std::string change_addr;
   {
     auto unused_internal = GetAddresses(/*used=*/false, /*internal=*/true);
     if (!unused_internal.empty()) {
-      change_seg_addr = unused_internal.front();
+      change_addr = unused_internal.front();
     } else {
       auto wallet_dto = GetWallet(/*skip_balance=*/true, /*skip_provider=*/true);
       const std::string path = wallet_dto.get_signers()[0].get_derivation_path();
@@ -997,11 +997,9 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
             NunchukException::INVALID_ADDRESS,
             "Failed to derive a fresh internal Liquid change address");
       }
-      change_seg_addr = fresh.front().address;
+      change_addr = fresh.front().address;
     }
   }
-  std::string change_addr =
-      wally_signer_->GetConfidentialAddressFromAddress(change_seg_addr);
 
   // 6) Helpers.
   auto select_for_asset =

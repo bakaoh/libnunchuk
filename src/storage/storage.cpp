@@ -1058,6 +1058,13 @@ bool NunchukStorage::IsSupportLiquid(Chain chain,
   return GetWalletDb(chain, wallet_id).IsSupportLiquid();
 }
 
+std::shared_ptr<wally::WallySigner> NunchukStorage::GetWallySignerForWallet(
+    Chain chain, const std::string& wallet_id) {
+  std::shared_lock<std::shared_mutex> lock(access_);
+  NunchukWalletDb wallet_db = GetWalletDb(chain, wallet_id);
+  return wallet_db.wally_signer_;
+}
+
 bool NunchukStorage::HasWallet(Chain chain, const std::string& wallet_id) {
   bfs::path wallet_file = GetWalletDir(chain, wallet_id);
   return bfs::exists(wallet_file);
