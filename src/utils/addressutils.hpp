@@ -25,7 +25,8 @@
 #include <key_io.h>
 #include <core_io.h>
 #include <liquid/wallyutils.hpp>
-
+#include <liquid/wallysigner.hpp>
+#include <coreutils.h>
 #include <string>
 #include <vector>
 
@@ -62,12 +63,34 @@ inline std::string ScriptPubKeyToAddress(const std::string& script_pub_key) {
   return ScriptPubKeyToAddress(script);
 }
 
+inline std::string DeriveAddress(
+    const std::string& descriptor,
+    const std::shared_ptr<nunchuk::wally::WallySigner>& signer,
+    const std::string& path, uint32_t idx, bool internal) {
+  using namespace nunchuk;
+  if (!descriptor.empty()) {
+    return CoreUtils::getInstance().DeriveAddress(descriptor, idx);
+  } else if (!signer) {
+    throw NunchukException(NunchukException::INVALID_PARAMETER,
+                           "Liquid wallet signer is not available");
+  }
+  auto details = signer->CacheAddresses(path, idx, idx + 1, internal);
+  if (details.empty()) {
+    throw NunchukException(NunchukException::INVALID_ADDRESS,
+                           "Failed to derive Liquid address");
+  }
+  return details[0].address;
+};
+
 inline std::string AddressToScriptHash(const std::string& address) {
+  using namespace nunchuk::wally;
   CSHA256 hasher;
   std::vector<unsigned char> spk;
-  if (address.find(
-          std::string(nunchuk::wally::WallyUtils::C().ADDRESS_FAMILY)) == 0) {
-    spk = nunchuk::wally::WallyUtils::GetScriptPubkeyFromAddress(address);
+  if (address.find(std::string(WallyUtils::C().ADDRESS_FAMILY)) == 0) {
+    spk = WallyUtils::GetScriptPubkeyFromAddress(address);
+  } else if (address.find(std::string(
+                 WallyUtils::C().CONFIDENTIAL_ADDRESS_FAMILY)) == 0) {
+    spk = WallyUtils::GetScriptPubkeyFromConfidentialAddress(address);
   } else {
     spk = ParseHex(AddressToScriptPubKey(address));
   }

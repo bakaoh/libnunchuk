@@ -18,6 +18,7 @@
 #include <backend/electrum/synchronizer.h>
 #include <backend/corerpc/synchronizer.h>
 #include <coreutils.h>
+#include <utils/addressutils.hpp>
 
 using namespace boost::asio;
 
@@ -125,12 +126,20 @@ int Synchronizer::GetChainTip() {
 std::string Synchronizer::NewAddress(Chain chain, const std::string& wallet_id,
                                      bool internal) {
   auto wallet = storage_->GetWallet(chain, wallet_id, false, false);
-  std::string descriptor = wallet.get_descriptor(
-      internal ? DescriptorPath::INTERNAL_ALL : DescriptorPath::EXTERNAL_ALL);
   int index =
       wallet.is_escrow()
           ? -1
           : storage_->GetCurrentAddressIndex(chain, wallet_id, internal) + 1;
+  std::string descriptor;
+  std::shared_ptr<wally::WallySigner> signer;
+  std::string path;
+  if (wallet.get_wallet_type() != WalletType::LIQUID) {
+    descriptor = wallet.get_descriptor(internal ? DescriptorPath::INTERNAL_ALL
+                                                : DescriptorPath::EXTERNAL_ALL);
+  } else {
+    signer = storage_->GetWallySignerForWallet(chain, wallet_id);
+    path = wallet.get_signers()[0].get_derivation_path();
+  }
 
   if (SupportBatchLookAhead()) {
     while (true) {
@@ -138,14 +147,13 @@ std::string Synchronizer::NewAddress(Chain chain, const std::string& wallet_id,
       std::vector<int> indexes;
       for (int i = index; i < index + wallet.get_gap_limit(); i++) {
         addresses.push_back(
-            CoreUtils::getInstance().DeriveAddress(descriptor, i));
+            DeriveAddress(descriptor, signer, path, i, internal));
         indexes.push_back(i);
       }
       int last = BatchLookAhead(chain, wallet_id, addresses, indexes, internal);
       if (last < wallet.get_gap_limit() - 1) {
         index = index + last + 1;
-        auto address =
-            CoreUtils::getInstance().DeriveAddress(descriptor, index);
+        auto address = DeriveAddress(descriptor, signer, path, index, internal);
         storage_->AddAddress(chain, wallet_id, address, index, internal);
         return address;
       }
