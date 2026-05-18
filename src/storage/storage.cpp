@@ -425,7 +425,7 @@ NunchukWalletDb NunchukStorage::GetWalletDb(Chain chain,
     if (!signers.empty()) {
       try {
         const std::string mid =
-            ba::to_lower_copy(signers.front().get_master_signer_id());
+            ba::to_lower_copy(signers.front().get_master_fingerprint());
         auto signer_db = GetSignerDb(chain, mid);
         std::string signer_passphrase =
             signer_passphrase_.count(mid) ? signer_passphrase_.at(mid) : "";
@@ -1442,8 +1442,9 @@ Transaction NunchukStorage::DraftLiquidTransaction(
                                     /*persist=*/false);
 }
 
-Transaction NunchukStorage::SignLiquidTransaction(
-    Chain chain, const std::string& wallet_id, const std::string& tx_id) {
+Transaction NunchukStorage::SignLiquidTransaction(Chain chain,
+                                                  const std::string& wallet_id,
+                                                  const std::string& tx_id) {
   std::unique_lock<std::shared_mutex> lock(access_);
   auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
   return db.SignLiquidTransaction(tx_id);
