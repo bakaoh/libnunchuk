@@ -440,6 +440,12 @@ std::map<std::string, AddressData> NunchukWalletDb::GetAllAddressData(
         wallet.get_descriptor(DescriptorPath::EXTERNAL_ALL));
     addresses[addr] = {addr, 0, false, false};
   } else if (wallet.get_wallet_type() == WalletType::LIQUID) {
+    if (!wally_signer_) {
+      throw NunchukException(
+          NunchukException::INVALID_PARAMETER,
+          "Liquid wallet signer is not available (unlock signer passphrase "
+          "before opening the wallet)");
+    }
     std::string path = wallet.get_signers()[0].get_derivation_path();
     int index = GetCurrentAddressIndex(true) + wallet.get_gap_limit();
     auto internal_addr = wally_signer_->CacheAddresses(path, 0, index, true);
