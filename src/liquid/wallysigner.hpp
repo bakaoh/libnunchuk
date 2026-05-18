@@ -179,11 +179,15 @@ class WallySigner {
 
  public:
   WallySigner(const std::string& mnemonic, const std::string& passphrase) {
+    WallyUtils::Init();
     std::vector<unsigned char> seed(BIP39_SEED_LEN_512);
     CHECK_WALLY(bip39_mnemonic_to_seed512(mnemonic.c_str(), passphrase.c_str(),
                                           seed.data(), seed.size()));
-    CHECK_WALLY(bip32_key_from_seed_alloc(seed.data(), seed.size(),
-                                          BIP32_VER_TEST_PRIVATE, 0, &master_));
+    const uint32_t bip32_ver = (Utils::GetChain() == Chain::MAIN)
+                                   ? BIP32_VER_MAIN_PRIVATE
+                                   : BIP32_VER_TEST_PRIVATE;
+    CHECK_WALLY(bip32_key_from_seed_alloc(seed.data(), seed.size(), bip32_ver,
+                                          0, &master_));
     master_blinding_key_.resize(HMAC_SHA512_LEN);
     CHECK_WALLY(wally_asset_blinding_key_from_seed(
         seed.data(), seed.size(), master_blinding_key_.data(),
@@ -232,16 +236,17 @@ class WallySigner {
       throw NunchukException(NunchukException::INVALID_PARAMETER,
                              "Invalid hd keypath");
     }
-    // keypath.push_back(is_change ? 1 : 0);
-    keypath.push_back(start_index);
+    keypath.push_back(is_change ? 1u : 0u);
     std::vector<AddressDetail> rs{};
     for (uint32_t index = start_index; index < end_index; index++) {
-      keypath.back() = index;
+      keypath.push_back(index);
       std::string address = GetAddress(keypath);
-      std::string confidential_address = GetConfidentialAddressFromAddress(address);
+      std::string confidential_address =
+          GetConfidentialAddressFromAddress(address);
       AddressDetail detail{index, confidential_address, is_change};
       rs.push_back(detail);
       spk_.emplace(WallyUtils::GetScriptPubkeyFromAddress(address), detail);
+      keypath.pop_back();
     }
     return rs;
   }
