@@ -162,7 +162,7 @@ std::string Synchronizer::NewAddress(Chain chain, const std::string& wallet_id,
   }
 
   while (true) {
-    auto address = CoreUtils::getInstance().DeriveAddress(descriptor, index);
+    auto address = DeriveAddress(descriptor, signer, path, index, internal);
     if (!LookAhead(chain, wallet_id, address, index, internal)) {
       storage_->AddAddress(chain, wallet_id, address, index, internal);
       return address;
