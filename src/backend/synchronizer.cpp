@@ -90,48 +90,22 @@ void Synchronizer::AddBalancesListener(
     std::function<void(std::string, Amount, Amount,
                        const std::map<AssetId, Amount>&)>
         listener) {
-  balances_listener_.connect(
-      [listener](std::string wallet_id, Amount balance,
-                 Amount unconfirmed_balance,
-                 const std::map<AssetId, Amount>& asset_balances) {
-        try {
-          listener(wallet_id, balance, unconfirmed_balance, asset_balances);
-        } catch (...) {
-        }
-      });
+  balances_listener_.connect(MakeSafeSlot(listener));
 }
 
 void Synchronizer::AddBlockListener(
     std::function<void(int, std::string, bool)> listener) {
-  block_listener_.connect([listener](int height, std::string hex, bool liquid) {
-    try {
-      listener(height, hex, liquid);
-    } catch (...) {
-    }
-  });
+  block_listener_.connect(MakeSafeSlot(listener));
 }
 
 void Synchronizer::AddTransactionListener(
     std::function<void(std::string, TransactionStatus, std::string)> listener) {
-  transaction_listener_.connect([listener](std::string tx_id,
-                                           TransactionStatus status,
-                                           std::string wallet_id) {
-    try {
-      listener(tx_id, status, wallet_id);
-    } catch (...) {
-    }
-  });
+  transaction_listener_.connect(MakeSafeSlot(listener));
 }
 
 void Synchronizer::AddBlockchainConnectionListener(
     std::function<void(ConnectionStatus, int)> listener) {
-  connection_listener_.connect(
-      [listener](ConnectionStatus status, int percent) {
-        try {
-          listener(status, percent);
-        } catch (...) {
-        }
-      });
+  connection_listener_.connect(MakeSafeSlot(listener));
 }
 
 void Synchronizer::NotifyTransactionUpdate(const std::string& wallet_id,

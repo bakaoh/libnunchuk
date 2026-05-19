@@ -2388,7 +2388,7 @@ void NunchukImpl::AddTransactionListener(
 
 void NunchukImpl::AddDeviceListener(
     std::function<void(std::string, bool)> listener) {
-  device_listener_.connect(listener);
+  device_listener_.connect(MakeSafeSlot(listener));
 }
 
 void NunchukImpl::AddBlockchainConnectionListener(
@@ -2397,7 +2397,7 @@ void NunchukImpl::AddBlockchainConnectionListener(
 }
 
 void NunchukImpl::AddStorageUpdateListener(std::function<void()> listener) {
-  storage_listener_.connect(listener);
+  storage_listener_.connect(MakeSafeSlot(listener));
 }
 
 std::string NunchukImpl::CreatePsbt(

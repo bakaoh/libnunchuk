@@ -23,8 +23,22 @@
 #include <atomic>
 #include <boost/asio.hpp>
 #include <boost/signals2.hpp>
+#include <utils/loguru.hpp>
 
 namespace nunchuk {
+
+template <typename F>
+auto MakeSafeSlot(F&& listener) {
+  return [f = std::forward<F>(listener)](auto&&... args) {
+    try {
+      f(std::forward<decltype(args)>(args)...);
+    } catch (const std::exception& e) {
+      DLOG_F(ERROR, "listener failed: %s", e.what());
+    } catch (...) {
+      DLOG_F(ERROR, "listener failed: unknown exception");
+    }
+  };
+}
 
 class Synchronizer {
  public:
