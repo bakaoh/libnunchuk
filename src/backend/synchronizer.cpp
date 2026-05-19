@@ -90,22 +90,48 @@ void Synchronizer::AddBalancesListener(
     std::function<void(std::string, Amount, Amount,
                        const std::map<AssetId, Amount>&)>
         listener) {
-  balances_listener_.connect(listener);
+  balances_listener_.connect(
+      [listener](std::string wallet_id, Amount balance,
+                 Amount unconfirmed_balance,
+                 const std::map<AssetId, Amount>& asset_balances) {
+        try {
+          listener(wallet_id, balance, unconfirmed_balance, asset_balances);
+        } catch (...) {
+        }
+      });
 }
 
 void Synchronizer::AddBlockListener(
     std::function<void(int, std::string, bool)> listener) {
-  block_listener_.connect(listener);
+  block_listener_.connect([listener](int height, std::string hex, bool liquid) {
+    try {
+      listener(height, hex, liquid);
+    } catch (...) {
+    }
+  });
 }
 
 void Synchronizer::AddTransactionListener(
     std::function<void(std::string, TransactionStatus, std::string)> listener) {
-  transaction_listener_.connect(listener);
+  transaction_listener_.connect([listener](std::string tx_id,
+                                           TransactionStatus status,
+                                           std::string wallet_id) {
+    try {
+      listener(tx_id, status, wallet_id);
+    } catch (...) {
+    }
+  });
 }
 
 void Synchronizer::AddBlockchainConnectionListener(
     std::function<void(ConnectionStatus, int)> listener) {
-  connection_listener_.connect(listener);
+  connection_listener_.connect(
+      [listener](ConnectionStatus status, int percent) {
+        try {
+          listener(status, percent);
+        } catch (...) {
+        }
+      });
 }
 
 void Synchronizer::NotifyTransactionUpdate(const std::string& wallet_id,
