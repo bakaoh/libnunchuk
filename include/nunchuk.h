@@ -1700,8 +1700,8 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual std::string ImportHealthCheckSignature(
       const std::string& file_path) = 0;
   virtual Amount EstimateFee(int conf_target = 6, bool use_mempool = true) = 0;
-  virtual int GetChainTip() = 0;
-  virtual time_t GetMedianTimePast() = 0;
+  virtual int GetChainTip(bool liquid = false) = 0;
+  virtual time_t GetMedianTimePast(bool liquid = false) = 0;
   virtual Amount GetTotalAmount(const std::string& wallet_id,
                                 const std::vector<TxInput>& inputs) = 0;
   virtual std::string GetSelectedWallet() = 0;
@@ -2073,7 +2073,8 @@ class NUNCHUK_EXPORT Nunchuk {
                          const std::map<AssetId, Amount>& /* asset_balances */)>
           listener) = 0;
   virtual void AddBlockListener(
-      std::function<void(int /* height */, std::string /* hex_header */)>
+      std::function<void(int /* height */, std::string /* hex_header */,
+                         bool /* liquid */)>
           listener) = 0;
   virtual void AddTransactionListener(
       std::function<void(std::string /* tx_id */, TransactionStatus,

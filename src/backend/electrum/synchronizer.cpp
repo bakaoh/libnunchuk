@@ -379,21 +379,29 @@ void ElectrumSynchronizer::BlockchainSync(Chain chain) {
   {
     std::unique_lock<std::mutex> lock_(status_mutex_);
     if (status_ != Status::READY && status_ != Status::SYNCING) return;
-    auto header = client_->blockchain_headers_subscribe([&](json rs) {
-      chain_tip_ = rs[0]["height"];
-      storage_->SetChainTip(app_settings_.get_chain(), chain_tip_);
-      block_listener_(rs[0]["height"], rs[0]["hex"]);
-    });
-    chain_tip_ = header["height"];
     connection_listener_(ConnectionStatus::SYNCING, 0);
-    storage_->SetChainTip(chain, header["height"]);
-    block_listener_(header["height"], header["hex"]);
     if (client_) {
+      auto header = client_->blockchain_headers_subscribe([&](json rs) {
+        chain_tip_ = rs[0]["height"];
+        storage_->SetChainTip(app_settings_.get_chain(), chain_tip_, false);
+        block_listener_(rs[0]["height"], rs[0]["hex"], false);
+      });
+      chain_tip_ = header["height"];
+      storage_->SetChainTip(chain, header["height"], false);
+      block_listener_(header["height"], header["hex"], false);
       client_->scripthash_add_listener([&](json notification) {
         OnScripthashStatusChange(app_settings_.get_chain(), notification);
       });
     }
     if (liquid_client_) {
+      auto header = liquid_client_->blockchain_headers_subscribe([&](json rs) {
+        liquid_chain_tip_ = rs[0]["height"];
+        storage_->SetChainTip(app_settings_.get_chain(), liquid_chain_tip_, true);
+        block_listener_(rs[0]["height"], rs[0]["hex"], true);
+      });
+      liquid_chain_tip_ = header["height"];
+      storage_->SetChainTip(chain, header["height"], true);
+      block_listener_(header["height"], header["hex"], true);
       liquid_client_->scripthash_add_listener([&](json notification) {
         OnScripthashStatusChange(app_settings_.get_chain(), notification);
       });
@@ -458,7 +466,8 @@ void ElectrumSynchronizer::Broadcast(const std::string& raw_tx) {
   client_->blockchain_transaction_broadcast(raw_tx);
 }
 
-void ElectrumSynchronizer::BroadcastLiquidTransaction(const std::string& raw_tx) {
+void ElectrumSynchronizer::BroadcastLiquidTransaction(
+    const std::string& raw_tx) {
   std::unique_lock<std::mutex> lock_(status_mutex_);
   if (status_ != Status::READY && status_ != Status::SYNCING) {
     throw NunchukException(NunchukException::SERVER_REQUEST_ERROR,
@@ -481,7 +490,7 @@ Amount ElectrumSynchronizer::EstimateFee(int conf_target) {
       client_->blockchain_estimatefee(conf_target).dump());
 }
 
-time_t ElectrumSynchronizer::GetMedianTimePast() {
+time_t ElectrumSynchronizer::GetMedianTimePast(bool liquid) {
   std::unique_lock<std::mutex> lock_(status_mutex_);
   if (status_ != Status::READY && status_ != Status::SYNCING) {
     throw NunchukException(NunchukException::SERVER_REQUEST_ERROR,
@@ -732,7 +741,8 @@ std::map<std::string, std::string> ElectrumSynchronizer::GetRawTxs(
   return ret;
 }
 
-// Only called by TapProtocol, keep legacy behavior (bitcoin electrum) since we don't know wallet_id here.
+// Only called by TapProtocol, keep legacy behavior (bitcoin electrum) since we
+// don't know wallet_id here.
 Transaction ElectrumSynchronizer::GetTransaction(const std::string& tx_id) {
   std::unique_lock<std::mutex> lock_(status_mutex_);
   if (status_ != Status::READY && status_ != Status::SYNCING) {

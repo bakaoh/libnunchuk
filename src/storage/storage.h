@@ -210,8 +210,8 @@ class NunchukStorage {
   std::string FillPsbt(Chain chain, const std::string &wallet_id,
                        const std::string &psbt);
 
-  int GetChainTip(Chain chain);
-  bool SetChainTip(Chain chain, int height);
+  int GetChainTip(Chain chain, bool liquid);
+  bool SetChainTip(Chain chain, int height, bool liquid);
   std::string GetSelectedWallet(Chain chain);
   bool SetSelectedWallet(Chain chain, const std::string &wallet_id);
 

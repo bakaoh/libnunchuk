@@ -1950,10 +1950,12 @@ Amount NunchukImpl::EstimateFee(int conf_target, bool use_mempool) {
   return rs;
 }
 
-int NunchukImpl::GetChainTip() { return synchronizer_->GetChainTip(); }
+int NunchukImpl::GetChainTip(bool liquid) {
+  return synchronizer_->GetChainTip(liquid);
+}
 
-time_t NunchukImpl::GetMedianTimePast() {
-  return synchronizer_->GetMedianTimePast();
+time_t NunchukImpl::GetMedianTimePast(bool liquid) {
+  return synchronizer_->GetMedianTimePast(liquid);
 }
 
 Amount NunchukImpl::GetTotalAmount(const std::string& wallet_id,
@@ -2375,7 +2377,7 @@ void NunchukImpl::AddBalancesListener(
 }
 
 void NunchukImpl::AddBlockListener(
-    std::function<void(int, std::string)> listener) {
+    std::function<void(int, std::string, bool)> listener) {
   synchronizer_->AddBlockListener(listener);
 }
 

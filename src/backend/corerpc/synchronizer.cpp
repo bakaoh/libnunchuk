@@ -57,8 +57,8 @@ Amount CoreRpcSynchronizer::EstimateFee(int conf_target) {
   return client_->EstimateFee(conf_target);
 }
 
-time_t CoreRpcSynchronizer::GetMedianTimePast() {
-  if (stopped)
+time_t CoreRpcSynchronizer::GetMedianTimePast(bool liquid) {
+  if (stopped || liquid)
     throw NunchukException(NunchukException::SERVER_REQUEST_ERROR,
                            "Disconnected");
   auto blockchain_info = client_->GetBlockchainInfo();
@@ -154,8 +154,8 @@ void CoreRpcSynchronizer::BlockchainSync(
   auto blockchain_info = client_->GetBlockchainInfo();
   if (chain_tip_ != blockchain_info["blocks"].get<int>()) {
     chain_tip_ = blockchain_info["blocks"].get<int>();
-    storage_->SetChainTip(chain, chain_tip_);
-    block_listener_(chain_tip_, blockchain_info["bestblockhash"]);
+    storage_->SetChainTip(chain, chain_tip_, false);
+    block_listener_(chain_tip_, blockchain_info["bestblockhash"], false);
   }
 
   auto wallet_ids = storage_->ListRecentlyUsedWallets(chain);

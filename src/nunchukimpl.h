@@ -295,8 +295,8 @@ class NunchukImpl : public Nunchuk {
   void CacheMasterSignerXPub(const std::string& mastersigner_id,
                              std::function<bool(int)> progress) override;
   Amount EstimateFee(int conf_target = 6, bool use_mempool = true) override;
-  int GetChainTip() override;
-  time_t GetMedianTimePast() override;
+  int GetChainTip(bool liquid = false) override;
+  time_t GetMedianTimePast(bool liquid = false) override;
   Amount GetTotalAmount(const std::string& wallet_id,
                         const std::vector<TxInput>& inputs) override;
   std::string GetSelectedWallet() override;
@@ -501,7 +501,7 @@ class NunchukImpl : public Nunchuk {
                                               const std::map<AssetId, Amount>&)>
                                listener) override;
   void AddBlockListener(
-      std::function<void(int, std::string)> listener) override;
+      std::function<void(int, std::string, bool)> listener) override;
   void AddTransactionListener(
       std::function<void(std::string, TransactionStatus, std::string)> listener)
       override;

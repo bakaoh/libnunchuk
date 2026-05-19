@@ -1490,7 +1490,7 @@ bool NunchukStorage::SetUtxos(Chain chain, const std::string& wallet_id,
 }
 
 WalletBalances NunchukStorage::GetBalances(Chain chain,
-                                             const std::string& wallet_id) {
+                                           const std::string& wallet_id) {
   std::shared_lock<std::shared_mutex> lock(access_);
   auto db = GetWalletDb(chain, wallet_id);
   WalletBalances balances;
@@ -1530,14 +1530,14 @@ void NunchukStorage::MaybeMigrate(Chain chain) {
   appstate.SetStorageVersion(STORAGE_VER);
 }
 
-int NunchukStorage::GetChainTip(Chain chain) {
+int NunchukStorage::GetChainTip(Chain chain, bool liquid) {
   std::shared_lock<std::shared_mutex> lock(access_);
-  return GetAppStateDb(chain).GetChainTip();
+  return GetAppStateDb(chain).GetChainTip(liquid);
 }
 
-bool NunchukStorage::SetChainTip(Chain chain, int value) {
+bool NunchukStorage::SetChainTip(Chain chain, int value, bool liquid) {
   std::unique_lock<std::shared_mutex> lock(access_);
-  return GetAppStateDb(chain).SetChainTip(value);
+  return GetAppStateDb(chain).SetChainTip(value, liquid);
 }
 
 std::string NunchukStorage::GetSelectedWallet(Chain chain) {

@@ -94,7 +94,7 @@ void Synchronizer::AddBalancesListener(
 }
 
 void Synchronizer::AddBlockListener(
-    std::function<void(int, std::string)> listener) {
+    std::function<void(int, std::string, bool)> listener) {
   block_listener_.connect(listener);
 }
 
@@ -121,9 +121,9 @@ void Synchronizer::NotifyBalancesUpdate(Chain chain,
                      balances.asset_balances);
 }
 
-int Synchronizer::GetChainTip() {
-  int rs = chain_tip_;
-  if (rs <= 0) rs = storage_->GetChainTip(app_settings_.get_chain());
+int Synchronizer::GetChainTip(bool liquid) {
+  int rs = liquid ? liquid_chain_tip_ : chain_tip_;
+  if (rs <= 0) rs = storage_->GetChainTip(app_settings_.get_chain(), liquid);
   return rs;
 }
 

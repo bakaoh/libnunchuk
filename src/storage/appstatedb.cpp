@@ -23,10 +23,12 @@ namespace nunchuk {
 
 void NunchukAppStateDb::Init() { CreateTable(); }
 
-int NunchukAppStateDb::GetChainTip() const { return GetInt(DbKeys::CHAIN_TIP); }
+int NunchukAppStateDb::GetChainTip(bool liquid) const {
+  return GetInt(liquid ? DbKeys::LIQUID_CHAIN_TIP : DbKeys::CHAIN_TIP);
+}
 
-bool NunchukAppStateDb::SetChainTip(int value) {
-  return PutInt(DbKeys::CHAIN_TIP, value);
+bool NunchukAppStateDb::SetChainTip(int value, bool liquid) {
+  return PutInt(liquid ? DbKeys::LIQUID_CHAIN_TIP : DbKeys::CHAIN_TIP, value);
 }
 
 std::string NunchukAppStateDb::GetSelectedWallet() const {
