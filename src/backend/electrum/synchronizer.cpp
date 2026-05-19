@@ -365,6 +365,7 @@ std::map<std::string, std::string> ElectrumSynchronizer::SubscribeAddresses(
     const std::string& wallet_id, const std::vector<std::string>& addresses) {
   std::vector<std::string> scripthashes{};
   for (auto&& address : addresses) {
+    if (address.empty()) continue;
     std::string scripthash = AddressToScriptHash(address);
     scripthash_to_wallet_address_[scripthash] = {wallet_id, address};
     scripthashes.push_back(scripthash);
@@ -425,6 +426,7 @@ void ElectrumSynchronizer::BlockchainSync(Chain chain) {
         std::unique_lock<std::mutex> lock_(status_mutex_);
         if (status_ != Status::READY && status_ != Status::SYNCING) return;
         auto address = *a;
+        if (address.empty()) continue;
         auto sub = SubscribeAddress(wallet_id, address);
         auto prev_status =
             storage_->GetAddressStatus(chain, wallet_id, address);
@@ -516,6 +518,7 @@ bool ElectrumSynchronizer::LookAhead(Chain chain, const std::string& wallet_id,
   std::unique_lock<std::mutex> lock_(status_mutex_);
   if (status_ != Status::READY && status_ != Status::SYNCING) return false;
   if (chain != app_settings_.get_chain()) return false;
+  if (address.empty()) return false;
 
   auto sub = SubscribeAddress(wallet_id, address);
   auto prev_status = storage_->GetAddressStatus(chain, wallet_id, address);
