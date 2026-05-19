@@ -35,6 +35,12 @@
 
 namespace nunchuk {
 
+struct WalletBalances {
+  Amount balance{0};
+  Amount unconfirmed_balance{0};
+  std::map<AssetId, Amount> asset_balances;
+};
+
 class NunchukStorage {
  public:
   static std::shared_ptr<NunchukStorage> get(const std::string &account);
@@ -200,8 +206,7 @@ class NunchukStorage {
                                               const std::string &tx_id);
   bool SetUtxos(Chain chain, const std::string &wallet_id,
                 const std::string &address, const std::string &utxo);
-  Amount GetBalance(Chain chain, const std::string &wallet_id);
-  Amount GetUnconfirmedBalance(Chain chain, const std::string &wallet_id);
+  WalletBalances GetBalances(Chain chain, const std::string &wallet_id);
   std::string FillPsbt(Chain chain, const std::string &wallet_id,
                        const std::string &psbt);
 

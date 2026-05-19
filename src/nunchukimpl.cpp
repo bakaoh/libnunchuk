@@ -496,8 +496,8 @@ std::string NunchukImpl::GetUnusedAddress(const Wallet& wallet, int& index,
   std::shared_ptr<wally::WallySigner> signer;
   std::string path;
   if (wallet.get_wallet_type() != WalletType::LIQUID) {
-    descriptor = wallet.get_descriptor(
-        internal ? DescriptorPath::INTERNAL_ALL : DescriptorPath::EXTERNAL_ALL);
+    descriptor = wallet.get_descriptor(internal ? DescriptorPath::INTERNAL_ALL
+                                                : DescriptorPath::EXTERNAL_ALL);
   } else {
     signer = storage_->GetWallySignerForWallet(chain_, wallet_id);
     path = wallet.get_signers()[0].get_derivation_path();
@@ -509,7 +509,8 @@ std::string NunchukImpl::GetUnusedAddress(const Wallet& wallet, int& index,
       std::vector<std::string> addresses;
       std::vector<int> indexes;
       for (int i = index; i < index + wallet.get_gap_limit(); i++) {
-        addresses.push_back(DeriveAddress(descriptor, signer, path, i, internal));
+        addresses.push_back(
+            DeriveAddress(descriptor, signer, path, i, internal));
         indexes.push_back(i);
       }
       int last = synchronizer_->BatchLookAhead(chain_, wallet_id, addresses,
@@ -2366,13 +2367,10 @@ void NunchukImpl::RescanBlockchain(int start_height, int stop_height) {
   synchronizer_->RescanBlockchain(start_height, stop_height);
 }
 
-void NunchukImpl::AddBalanceListener(
-    std::function<void(std::string, Amount)> listener) {
-  synchronizer_->AddBalanceListener(listener);
-}
-
 void NunchukImpl::AddBalancesListener(
-    std::function<void(std::string, Amount, Amount)> listener) {
+    std::function<void(std::string, Amount, Amount,
+                       const std::map<AssetId, Amount>&)>
+        listener) {
   synchronizer_->AddBalancesListener(listener);
 }
 

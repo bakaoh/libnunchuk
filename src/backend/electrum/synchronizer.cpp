@@ -442,11 +442,7 @@ void ElectrumSynchronizer::BlockchainSync(Chain chain) {
       if (unused.empty()) NewAddress(chain, wallet_id, false);
     } catch (...) {
     }
-    Amount balance = storage_->GetBalance(chain, wallet_id);
-    balance_listener_(wallet_id, balance);
-    Amount unconfirmed_balance =
-        storage_->GetUnconfirmedBalance(chain, wallet_id);
-    balances_listener_(wallet_id, balance, unconfirmed_balance);
+    NotifyBalancesUpdate(chain, wallet_id);
     connection_listener_(ConnectionStatus::SYNCING,
                          ++process * 100 / wallet_ids.size());
   }
@@ -565,11 +561,7 @@ int ElectrumSynchronizer::BatchLookAhead(
   }
 
   UpdateScripthashesStatus(chain, wallet_id, scripthashes, status);
-  Amount balance = storage_->GetBalance(chain, wallet_id);
-  balance_listener_(wallet_id, balance);
-  Amount unconfirmed_balance =
-      storage_->GetUnconfirmedBalance(chain, wallet_id);
-  balances_listener_(wallet_id, balance, unconfirmed_balance);
+  NotifyBalancesUpdate(chain, wallet_id);
   return lastUsedIdx;
 }
 
@@ -597,11 +589,7 @@ void ElectrumSynchronizer::UpdateScripthashStatus(Chain chain,
     storage_->SetUtxos(chain, wallet_id, address, utxostatus);
   }
   if (check_balance) {
-    Amount balance = storage_->GetBalance(chain, wallet_id);
-    balance_listener_(wallet_id, balance);
-    Amount unconfirmed_balance =
-        storage_->GetUnconfirmedBalance(chain, wallet_id);
-    balances_listener_(wallet_id, balance, unconfirmed_balance);
+    NotifyBalancesUpdate(chain, wallet_id);
   }
 }
 

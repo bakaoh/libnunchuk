@@ -1489,16 +1489,17 @@ bool NunchukStorage::SetUtxos(Chain chain, const std::string& wallet_id,
   return GetWalletDb(chain, wallet_id).SetUtxos(address, utxo);
 }
 
-Amount NunchukStorage::GetBalance(Chain chain, const std::string& wallet_id) {
-  std::shared_lock<std::shared_mutex> lock(access_);
-  return GetWalletDb(chain, wallet_id).GetBalance(false);
-}
-
-Amount NunchukStorage::GetUnconfirmedBalance(Chain chain,
+WalletBalances NunchukStorage::GetBalances(Chain chain,
                                              const std::string& wallet_id) {
   std::shared_lock<std::shared_mutex> lock(access_);
-  return GetWalletDb(chain, wallet_id).GetBalance(true);
+  auto db = GetWalletDb(chain, wallet_id);
+  WalletBalances balances;
+  balances.balance = db.GetBalance(false);
+  balances.unconfirmed_balance = db.GetBalance(true);
+  balances.asset_balances = db.GetAssetBalances();
+  return balances;
 }
+
 std::string NunchukStorage::FillPsbt(Chain chain, const std::string& wallet_id,
                                      const std::string& psbt) {
   std::shared_lock<std::shared_mutex> lock(access_);

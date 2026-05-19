@@ -2067,12 +2067,10 @@ class NUNCHUK_EXPORT Nunchuk {
                                             const std::string& tx_id,
                                             const Device& device) = 0;
   // Add listener methods
-  virtual void AddBalanceListener(
-      std::function<void(std::string /* wallet_id */, Amount /* new_balance */)>
-          listener) = 0;
   virtual void AddBalancesListener(
       std::function<void(std::string /* wallet_id */, Amount /* balance */,
-                         Amount /* unconfirmed_balance */)>
+                         Amount /* unconfirmed_balance */,
+                         const std::map<AssetId, Amount>& /* asset_balances */)>
           listener) = 0;
   virtual void AddBlockListener(
       std::function<void(int /* height */, std::string /* hex_header */)>
@@ -2196,11 +2194,9 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual GroupSandbox EnableGroupPlatformKey(
       const std::string& groupId,
       const std::vector<std::string>& names = {}) = 0;
-  virtual GroupSandbox DisableGroupPlatformKey(
-      const std::string& groupId) = 0;
+  virtual GroupSandbox DisableGroupPlatformKey(const std::string& groupId) = 0;
   virtual GroupSandbox SetGroupPlatformKeyPolicies(
-      const std::string& groupId,
-      const GroupPlatformKeyPolicies& policies) = 0;
+      const std::string& groupId, const GroupPlatformKeyPolicies& policies) = 0;
   virtual GroupSandbox UpdateGroup(const std::string& groupId,
                                    const std::string& name, int m, int n,
                                    AddressType addressType) = 0;
@@ -2228,15 +2224,12 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual std::vector<GroupDummyTransaction> GetGroupDummyTransactions(
       const std::string& walletId) = 0;
   virtual GroupDummyTransaction GetGroupDummyTransaction(
-      const std::string& walletId,
-      const std::string& dummyTransactionId) = 0;
+      const std::string& walletId, const std::string& dummyTransactionId) = 0;
   virtual GroupDummyTransaction SignGroupDummyTransaction(
-      const std::string& walletId,
-      const std::string& dummyTransactionId,
+      const std::string& walletId, const std::string& dummyTransactionId,
       const std::vector<std::string>& signatures) = 0;
   virtual void CancelGroupDummyTransaction(
-      const std::string& walletId,
-      const std::string& dummyTransactionId) = 0;
+      const std::string& walletId, const std::string& dummyTransactionId) = 0;
   virtual GroupTransactionState GetGroupTransactionState(
       const std::string& walletId, const std::string& txId) = 0;
   virtual int GetGroupWalletAlertCount(const std::string& walletId) = 0;

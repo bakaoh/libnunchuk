@@ -497,10 +497,9 @@ class NunchukImpl : public Nunchuk {
   void ScanWalletAddress(const std::string& wallet_id, bool force = false,
                          bool from_start = false) override;
 
-  void AddBalanceListener(
-      std::function<void(std::string, Amount)> listener) override;
-  void AddBalancesListener(
-      std::function<void(std::string, Amount, Amount)> listener) override;
+  void AddBalancesListener(std::function<void(std::string, Amount, Amount,
+                                              const std::map<AssetId, Amount>&)>
+                               listener) override;
   void AddBlockListener(
       std::function<void(int, std::string)> listener) override;
   void AddTransactionListener(
@@ -720,9 +719,9 @@ class NunchukImpl : public Nunchuk {
   GroupDummyTransaction SignGroupDummyTransaction(
       const std::string& walletId, const std::string& dummyTransactionId,
       const std::vector<std::string>& signatures) override;
-  void CancelGroupDummyTransaction(const std::string& walletId,
-                                   const std::string& dummyTransactionId)
-      override;
+  void CancelGroupDummyTransaction(
+      const std::string& walletId,
+      const std::string& dummyTransactionId) override;
   GroupTransactionState GetGroupTransactionState(
       const std::string& walletId, const std::string& txId) override;
   int GetGroupWalletAlertCount(const std::string& walletId) override;

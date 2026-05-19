@@ -241,11 +241,7 @@ void CoreRpcSynchronizer::BlockchainSync(
       }
     }
 
-    Amount balance = storage_->GetBalance(chain, wallet_id);
-    balance_listener_(wallet_id, balance);
-    Amount unconfirmed_balance =
-        storage_->GetUnconfirmedBalance(chain, wallet_id);
-    balances_listener_(wallet_id, balance, unconfirmed_balance);
+    NotifyBalancesUpdate(chain, wallet_id);
   }
 
   if (stopped) return;

@@ -39,9 +39,9 @@ class Synchronizer {
   std::string NewAddress(Chain chain, const std::string& wallet_id,
                          bool internal);
 
-  void AddBalanceListener(std::function<void(std::string, Amount)> listener);
-  void AddBalancesListener(
-      std::function<void(std::string, Amount, Amount)> listener);
+  void AddBalancesListener(std::function<void(std::string, Amount, Amount,
+                                              const std::map<AssetId, Amount>&)>
+                               listener);
   void AddBlockListener(std::function<void(int, std::string)> listener);
   void AddTransactionListener(
       std::function<void(std::string, TransactionStatus, std::string)>
@@ -51,6 +51,7 @@ class Synchronizer {
   void NotifyTransactionUpdate(const std::string& wallet_id,
                                const std::string& tx_id,
                                TransactionStatus status);
+  void NotifyBalancesUpdate(Chain chain, const std::string& wallet_id);
 
   virtual void Broadcast(const std::string& raw_tx) = 0;
   virtual void BroadcastLiquidTransaction(const std::string& raw_tx) {
@@ -75,7 +76,7 @@ class Synchronizer {
       const std::vector<std::string> tx_ids) = 0;
   virtual Transaction GetTransaction(const std::string& tx_id) = 0;
 
-  virtual void Run(){};
+  virtual void Run() {};
 
  protected:
   AppSettings app_settings_;
@@ -90,8 +91,9 @@ class Synchronizer {
   std::atomic<int> chain_tip_;
 
   // Listener
-  boost::signals2::signal<void(std::string, Amount)> balance_listener_;
-  boost::signals2::signal<void(std::string, Amount, Amount)> balances_listener_;
+  boost::signals2::signal<void(std::string, Amount, Amount,
+                               const std::map<AssetId, Amount>&)>
+      balances_listener_;
   boost::signals2::signal<void(int, std::string)> block_listener_;
   boost::signals2::signal<void(std::string, TransactionStatus, std::string)>
       transaction_listener_;

@@ -86,13 +86,10 @@ bool Synchronizer::NeedRecreate(const AppSettings& new_settings) {
   return false;
 }
 
-void Synchronizer::AddBalanceListener(
-    std::function<void(std::string, Amount)> listener) {
-  balance_listener_.connect(listener);
-}
-
 void Synchronizer::AddBalancesListener(
-    std::function<void(std::string, Amount, Amount)> listener) {
+    std::function<void(std::string, Amount, Amount,
+                       const std::map<AssetId, Amount>&)>
+        listener) {
   balances_listener_.connect(listener);
 }
 
@@ -115,6 +112,13 @@ void Synchronizer::NotifyTransactionUpdate(const std::string& wallet_id,
                                            const std::string& tx_id,
                                            TransactionStatus status) {
   transaction_listener_(tx_id, status, wallet_id);
+}
+
+void Synchronizer::NotifyBalancesUpdate(Chain chain,
+                                        const std::string& wallet_id) {
+  auto balances = storage_->GetBalances(chain, wallet_id);
+  balances_listener_(wallet_id, balances.balance, balances.unconfirmed_balance,
+                     balances.asset_balances);
 }
 
 int Synchronizer::GetChainTip() {
