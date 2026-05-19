@@ -358,7 +358,7 @@ void NunchukWalletDb::SetAddress(const std::string& address, int index,
 
 bool NunchukWalletDb::AddAddress(const std::string& address, int index,
                                  bool internal) {
-  if (address.empty()) return;
+  if (address.empty()) return false;
   auto all = GetAllAddressData();
   if (all.count(address) && all[address].used) return true;
   SetAddress(address, index, internal);
