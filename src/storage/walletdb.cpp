@@ -1452,9 +1452,8 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
       time_t blocktime = sqlite3_column_int64(stmt, 6);
 
       Transaction tx;
-      bool is_hex_tx = false;
       try {
-        std::tie(tx, is_hex_tx) = GetTransactionFromStr(value, wallet, height);
+        tx = GetTransactionFromVtxValue(value, wallet, height);
       } catch (...) {
         sqlite3_step(stmt);
         continue;

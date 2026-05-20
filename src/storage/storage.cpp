@@ -1254,6 +1254,9 @@ std::vector<Transaction> NunchukStorage::GetTransactions(
   std::unique_lock<std::shared_mutex> lock(access_);
   auto db = GetWalletDb(chain, wallet_id);
   auto vtx = db.GetTransactions(count, skip);
+  if (db.IsSupportLiquid()) {
+    return vtx;
+  }
 
   // remove invalid, out-of-date Send transactions
   const auto utxos_set = [utxos = db.GetCoins()]() {
