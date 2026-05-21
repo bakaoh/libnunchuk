@@ -1044,6 +1044,9 @@ Wallet NunchukStorage::GetWallet(Chain chain, const std::string& id,
   true_wallet.set_description(wallet.get_description());
   true_wallet.set_balance(wallet.get_balance());
   true_wallet.set_unconfirmed_balance(wallet.get_unconfirmed_balance());
+  for (auto&& asset_id : {Utils::GetUSDTAssetId(), Utils::GetLBTCAssetId()}) {
+    true_wallet.set_asset_balance(asset_id, wallet.get_asset_balance(asset_id));
+  }
   true_wallet.set_last_used(wallet.get_last_used());
   true_wallet.set_gap_limit(wallet.get_gap_limit());
   true_wallet.set_need_backup(wallet.need_backup());
