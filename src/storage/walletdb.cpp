@@ -1354,8 +1354,7 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     tx.set_m(wallet.get_m());
     tx.set_wallet_type(wallet.get_wallet_type());
     tx.set_address_type(wallet.get_address_type());
-    tx.set_fee(Amount(fee));
-    tx.set_fee_rate(0);
+    if (tx.get_fee() == 0) tx.set_fee(Amount(fee));
     if (change_pos >= 0 &&
         static_cast<size_t>(change_pos) < tx.mutable_outputs().size()) {
       tx.mutable_outputs()[change_pos].isChange = true;
@@ -1462,8 +1461,7 @@ std::vector<Transaction> NunchukWalletDb::GetTransactions(int count, int skip) {
       tx.set_m(wallet.get_m());
       tx.set_wallet_type(wallet.get_wallet_type());
       tx.set_address_type(wallet.get_address_type());
-      tx.set_fee(Amount(fee));
-      tx.set_fee_rate(0);
+      if (tx.get_fee() == 0) tx.set_fee(Amount(fee));
       if (change_pos >= 0 &&
           static_cast<size_t>(change_pos) < tx.mutable_outputs().size()) {
         tx.mutable_outputs()[change_pos].isChange = true;
@@ -1624,6 +1622,9 @@ void NunchukWalletDb::FillExtra(const std::string& extra,
     }
     if (extra_json["fee_rate"] != nullptr) {
       tx.set_fee_rate(extra_json["fee_rate"]);
+    }
+    if (extra_json["vsize"] != nullptr) {
+      tx.set_vsize(extra_json["vsize"]);
     }
     if (extra_json["subtract"] != nullptr) {
       tx.set_subtract_fee_from_amount(extra_json["subtract"]);

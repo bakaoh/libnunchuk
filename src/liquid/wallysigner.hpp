@@ -342,8 +342,16 @@ class WallySigner {
       CHECK_WALLY(wally_tx_get_input_witness_num_items(tx, vin, &items));
       if (items == 0) all_signed = false;
     }
+    uint64_t explicit_fee_sats = 0;
     for (size_t vout = 0; vout < tx->num_outputs; vout++) {
       const auto& txout = tx->outputs[vout];
+      if (IsExplicitLbtcFeeOutput(txout)) {
+        uint64_t fee_out = 0;
+        CHECK_WALLY(wally_tx_confidential_value_to_satoshi(
+            txout.value, txout.value_len, &fee_out));
+        explicit_fee_sats += fee_out;
+        continue;
+      }
       std::vector<unsigned char> script(txout.script,
                                         txout.script + txout.script_len);
       if (!spk_.contains(script)) continue;
@@ -405,6 +413,15 @@ class WallySigner {
       output.isReceive = true;
       output.assetId = AssetId(asset_id.begin(), asset_id.end());
       rs.add_output(output);
+    }
+    if (explicit_fee_sats > 0) {
+      const size_t vsize = all_signed ? ComputeVsizeFromTx(tx)
+                                      : ComputeSignedVsize(txHex);
+      rs.set_fee(Amount(explicit_fee_sats));
+      rs.set_vsize(static_cast<int>(vsize));
+      if (vsize > 0) {
+        rs.set_fee_rate(Amount(explicit_fee_sats * 1000 / vsize));
+      }
     }
     if (height == 0) {
       rs.set_status(TransactionStatus::PENDING_CONFIRMATION);
@@ -1160,6 +1177,32 @@ class WallySigner {
   // + 1   (pubkey length byte) + 33 (compressed pubkey)
   // = 108 WU
   static constexpr size_t kP2WPKHWitnessWU = 108;
+
+  // Elements explicit LBTC fee output (see CreateTx): empty script, explicit
+  // asset prefix, unblinded value.
+  static bool IsExplicitLbtcFeeOutput(const struct wally_tx_output& txout) {
+    if (txout.script_len != 0) return false;
+    if (txout.asset_len != WALLY_TX_ASSET_CT_ASSET_LEN) return false;
+    if (txout.asset[0] != WALLY_TX_ASSET_CT_EXPLICIT_PREFIX) return false;
+    if (txout.value_len != WALLY_TX_ASSET_CT_VALUE_UNBLIND_LEN) return false;
+    const auto& lbtc = WallyUtils::C().LBTC_ASSET_ID;
+    if (lbtc.size() != WALLY_TX_ASSET_TAG_LEN) return false;
+    return std::memcmp(txout.asset + 1, lbtc.data(), WALLY_TX_ASSET_TAG_LEN) ==
+           0;
+  }
+
+  // Vsize of an on-wire tx (witness already present). Applies Elements discount.
+  static size_t ComputeVsizeFromTx(struct wally_tx* tx) {
+    size_t weight = 0;
+    CHECK_WALLY(wally_tx_get_weight(tx, &weight));
+    size_t discount = 0;
+    CHECK_WALLY(wally_tx_get_elements_weight_discount(tx, 0, &discount));
+    if (discount > weight) discount = weight;
+    weight -= discount;
+    size_t vsize = 0;
+    CHECK_WALLY(wally_tx_vsize_from_weight(weight, &vsize));
+    return vsize;
+  }
 
   // Compute the vsize (vbytes) of a hypothetical *signed* tx given an unsigned
   // hex (witness stacks empty). Adds `witness_wu_per_input` weight units for

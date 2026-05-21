@@ -68,21 +68,17 @@ class WallyUtils {
 
   static WallyConstants& C() {
     static WallyConstants mainnet{
-        .ADDRESS_FAMILY = "ex",
-        .CONFIDENTIAL_ADDRESS_FAMILY = "lq",
-        .USDT_ASSET_ID = ParseHex(
-            "ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2"),
-        .LBTC_ASSET_ID = ParseHex(
-            "6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d"),
+        "ex",
+        "lq",
+        "d27ba36598fa8f2502aefffc9c3d76f16037ba1323631ab78bc7838b991c09ce"_hex_v_u8,
+        "6d521c38ec1ea15734ae22b7c46064412829c0d0579f0a713d1c04ede979026f"_hex_v_u8,
     };
 
     static WallyConstants testnet{
-        .ADDRESS_FAMILY = "tex",
-        .CONFIDENTIAL_ADDRESS_FAMILY = "tlq",
-        .USDT_ASSET_ID = ParseHex(
-            "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38"),
-        .LBTC_ASSET_ID = ParseHex(
-            "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14"),
+        "tex",
+        "tlq",
+        "a5502895799e276b4af246c821423b4ed5ec5e6b4e6df7a861606939d9a2fc38"_hex_v_u8,
+        "499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14"_hex_v_u8,
     };
 
     switch (nunchuk::Utils::GetChain()) {
