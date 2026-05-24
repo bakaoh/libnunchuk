@@ -23,6 +23,9 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <map>
 #include <utils/addressutils.hpp>
+#include <liquid/wallyutils.hpp>
+#include <wally_address.h>
+#include <wally_crypto.h>
 #include <utils/bip32.hpp>
 #include <utils/bsms.hpp>
 #include <utils/multisigconfig.hpp>
@@ -181,6 +184,27 @@ bool Utils::IsValidAddress(const std::string& address) {
 
 bool Utils::IsSilentPaymentAddress(const std::string& address) {
   return silentpayment::IsValidSilentPaymentAddress(address, Utils::GetChain());
+}
+
+bool Utils::IsLiquidAddress(const std::string& address) {
+  if (address.empty()) return false;
+  const auto& c = wally::WallyUtils::C();
+
+  std::vector<unsigned char> spk(128);
+  size_t spk_len = 0;
+  if (wally_addr_segwit_to_bytes(address.c_str(), c.ADDRESS_FAMILY, 0, spk.data(),
+                               spk.size(), &spk_len) == WALLY_OK) {
+    return true;
+  }
+
+  std::vector<unsigned char> blinding_pubkey(EC_PUBLIC_KEY_LEN);
+  if (wally_confidential_addr_segwit_to_ec_public_key(
+          address.c_str(), c.CONFIDENTIAL_ADDRESS_FAMILY, blinding_pubkey.data(),
+          blinding_pubkey.size()) == WALLY_OK) {
+    return true;
+  }
+
+  return false;
 }
 
 Amount Utils::AmountFromValue(const std::string& value,

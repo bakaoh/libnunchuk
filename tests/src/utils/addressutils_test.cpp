@@ -51,5 +51,31 @@ TEST_CASE("Liquid confidential and unconfidential share Electrum scripthash") {
       "lq1qqw3e3mk4ng3ks43mh54udznuekaadh9lgwef3mwgzrfzakmdwcvqphz2704pfvz"
       "eycs4zn3t6jswpq78ltp0yxz3p90nf3npx";
   CHECK(AddressToScriptHash(unconf) == AddressToScriptHash(conf));
+  CHECK(nunchuk::Utils::IsLiquidAddress(unconf));
+  CHECK(nunchuk::Utils::IsLiquidAddress(conf));
+  CHECK_FALSE(nunchuk::Utils::IsLiquidAddress(
+      "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"));
+  nunchuk::wally::WallyUtils::Cleanup();
+}
+
+TEST_CASE("IsLiquidAddress respects chain") {
+  nunchuk::wally::WallyUtils::Init();
+  const char* main_unconf = "ex1qm39086s5kpvjvg23fc4afg8qs0rl4shj76t00e";
+  const char* main_conf =
+      "lq1qqw3e3mk4ng3ks43mh54udznuekaadh9lgwef3mwgzrfzakmdwcvqphz2704pfvz"
+      "eycs4zn3t6jswpq78ltp0yxz3p90nf3npx";
+  const char* test_conf =
+      "tlq1qq2k4x6xr9nqsv0y5n6sc7k3qr8gpel8kt676qnxx8na2kkfmsrc3ayatr5eptrrtq"
+      "gj47rve6cvhheac9u5fu5f7we47qwjcs";
+
+  nunchuk::Utils::SetChain(nunchuk::Chain::MAIN);
+  CHECK(nunchuk::Utils::IsLiquidAddress(main_unconf));
+  CHECK(nunchuk::Utils::IsLiquidAddress(main_conf));
+  CHECK_FALSE(nunchuk::Utils::IsLiquidAddress(test_conf));
+
+  nunchuk::Utils::SetChain(nunchuk::Chain::TESTNET);
+  CHECK(nunchuk::Utils::IsLiquidAddress(test_conf));
+  CHECK_FALSE(nunchuk::Utils::IsLiquidAddress(main_unconf));
+  CHECK_FALSE(nunchuk::Utils::IsLiquidAddress(main_conf));
   nunchuk::wally::WallyUtils::Cleanup();
 }
