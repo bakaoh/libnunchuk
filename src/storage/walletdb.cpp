@@ -259,7 +259,9 @@ Wallet NunchukWalletDb::GetWallet(bool skip_balance, bool skip_provider) {
   wallet.set_need_backup(GetInt(DbKeys::NEED_BACKUP) == 1);
   wallet.set_archived(GetInt(DbKeys::ARCHIVED) == 1);
   wallet.set_wallet_template(wallet_template);
-  if (!skip_provider) {
+  if (!skip_provider && wallet.get_wallet_type() == WalletType::LIQUID) {
+    GetAllAddressData(true);
+  } else if (!skip_provider) {
     GetAllAddressData(false);  // update range to max address index
     auto desc = GetDescriptorsImportString(wallet);
     SigningProviderCache::getInstance().PreCalculate(desc);
