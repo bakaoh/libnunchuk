@@ -915,7 +915,34 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
                            "fee_rate must be > 0 sat/kvB");
   }
 
-  // 1) Load all known transactions and unblind their outputs that belong to
+  const AssetId LBTC = wally::WallyUtils::C().LBTC_ASSET_ID;
+
+  // 1) Per-asset targets and destination map for wally::WallySigner::CreateTx.
+  std::map<AssetId, Amount> targets;
+  wally::WallySigner::AssetDestinations destinations;
+  for (const auto& [aid, dest_map] : outputs) {
+    if (aid.size() != 32) {
+      throw NunchukException(NunchukException::INVALID_PARAMETER,
+                             "Invalid asset id (must be 32 bytes)");
+    }
+    Amount sum = 0;
+    for (const auto& [addr, amount] : dest_map) {
+      if (!Utils::IsLiquidAddress(addr)) {
+        throw NunchukException(NunchukException::INVALID_PARAMETER,
+                               "Invalid liquid address");
+      }
+      if (amount <= 0) {
+        throw NunchukException(NunchukException::INVALID_PARAMETER,
+                               "Output amount must be > 0");
+      }
+      destinations[aid][addr] = static_cast<uint64_t>(amount);
+      sum += amount;
+    }
+    targets[aid] = sum;
+  }
+  if (!targets.count(LBTC)) targets[LBTC] = 0;  // still needed to pay fee
+
+  // 2) Load all known transactions and unblind their outputs that belong to
   // this wallet. Each call returns one LiquidUtxos per source tx that contains
   // every wallet-owned output of that tx (multi-asset capable).
   std::vector<std::string> tx_hexes = GetVtxValues();
@@ -925,7 +952,7 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
     per_tx_utxos.push_back(wally_signer_->GetUtxosFromTx(hex));
   }
 
-  // 2) Compute the set of spent outpoints by scanning inputs of every known tx.
+  // 3) Compute the set of spent outpoints by scanning inputs of every known tx.
   std::set<std::pair<std::vector<unsigned char>, uint32_t>> spent;
   for (const auto& u : per_tx_utxos) {
     for (size_t i = 0; i < u.vins_tx_id.size(); ++i) {
@@ -933,7 +960,7 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
     }
   }
 
-  // 3) Flatten available coins (txIdx, k) for greedy selection.
+  // 4) Flatten available coins (txIdx, k) for greedy selection.
   struct Coin {
     size_t tx_idx;
     size_t k;
@@ -960,29 +987,6 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
       return coins[a].value > coins[b].value;  // largest-first
     });
   }
-
-  const AssetId LBTC = wally::WallyUtils::C().LBTC_ASSET_ID;
-
-  // 4) Per-asset targets and destination map for wally::WallySigner::CreateTx.
-  std::map<AssetId, Amount> targets;
-  wally::WallySigner::AssetDestinations destinations;
-  for (const auto& [aid, dest_map] : outputs) {
-    if (aid.size() != 32) {
-      throw NunchukException(NunchukException::INVALID_PARAMETER,
-                             "Invalid asset id (must be 32 bytes)");
-    }
-    Amount sum = 0;
-    for (const auto& [addr, amount] : dest_map) {
-      if (amount <= 0) {
-        throw NunchukException(NunchukException::INVALID_PARAMETER,
-                               "Output amount must be > 0");
-      }
-      destinations[aid][addr] = static_cast<uint64_t>(amount);
-      sum += amount;
-    }
-    targets[aid] = sum;
-  }
-  if (!targets.count(LBTC)) targets[LBTC] = 0;  // still needed to pay fee
 
   // 5) Change address: prefer an unused internal address already tracked by
   // the wallet; otherwise derive a fresh one via the WallySigner. The
@@ -1139,10 +1143,9 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
                            /*fee=*/Amount(feeSats), memo, /*change_pos=*/-1);
   } else {
     tx = wally_signer_->GetTransactionFromTx(unsigned_hex, /*height=*/-1);
-    auto wallet = GetWallet(true, true);
-    tx.set_m(wallet.get_m());
-    tx.set_wallet_type(wallet.get_wallet_type());
-    tx.set_address_type(wallet.get_address_type());
+    tx.set_m(1);
+    tx.set_wallet_type(WalletType::LIQUID);
+    tx.set_address_type(AddressType::NATIVE_SEGWIT);
   }
   tx.set_fee(Amount(feeSats));
   tx.set_fee_rate(fee_rate);
