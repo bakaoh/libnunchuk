@@ -1521,10 +1521,10 @@ class NUNCHUK_EXPORT Nunchuk {
       const std::map<std::string, SingleSigner>& signers,
       AddressType address_type, const std::string& description = {},
       bool allow_used_signer = false, const std::string& decoy_pin = {}) = 0;
-  virtual std::string GetHotWalletMnemonic(
+  virtual std::string GetUnbackedUpWalletMnemonic(
       const std::string& wallet_id, const std::string& passphrase = {}) = 0;
-  virtual std::string GetHotKeyMnemonic(const std::string& signer_id,
-                                        const std::string& passphrase = {}) = 0;
+  virtual std::string GetUnbackedUpKeyMnemonic(
+      const std::string& signer_id, const std::string& passphrase = {}) = 0;
   virtual std::string DraftWallet(
       const std::string& name, int m, int n,
       const std::vector<SingleSigner>& signers, AddressType address_type,

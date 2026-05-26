@@ -191,11 +191,14 @@ Wallet NunchukImpl::CreateHotWallet(const std::string& mnemonic,
   return wallet;
 }
 
-std::string NunchukImpl::GetHotWalletMnemonic(const std::string& wallet_id,
-                                              const std::string& passphrase) {
+std::string NunchukImpl::GetUnbackedUpWalletMnemonic(
+    const std::string& wallet_id, const std::string& passphrase) {
   auto wallet = storage_->GetWallet(chain_, wallet_id, false);
-  if (wallet.get_wallet_type() != WalletType::SINGLE_SIG ||
-      !wallet.need_backup()) {
+  if (!wallet.need_backup()) {
+    throw NunchukException(NunchukException::INVALID_STATE,
+                           "Wallet is already backed up");
+  } else if (wallet.get_wallet_type() != WalletType::SINGLE_SIG &&
+             wallet.get_wallet_type() != WalletType::LIQUID) {
     throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
                            "Invalid wallet type");
   }
@@ -203,10 +206,13 @@ std::string NunchukImpl::GetHotWalletMnemonic(const std::string& wallet_id,
   return storage_->GetMnemonic(chain_, signer_id, passphrase);
 }
 
-std::string NunchukImpl::GetHotKeyMnemonic(const std::string& signer_id,
-                                           const std::string& passphrase) {
+std::string NunchukImpl::GetUnbackedUpKeyMnemonic(
+    const std::string& signer_id, const std::string& passphrase) {
   auto signer = storage_->GetMasterSigner(chain_, signer_id);
-  if (signer.get_type() != SignerType::SOFTWARE || !signer.need_backup()) {
+  if (!signer.need_backup()) {
+    throw NunchukException(NunchukException::INVALID_STATE,
+                           "Signer is already backed up");
+  } else if (signer.get_type() != SignerType::SOFTWARE) {
     throw NunchukException(NunchukException::INVALID_SIGNER_TYPE,
                            "Invalid signer type");
   }

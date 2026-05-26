@@ -66,10 +66,12 @@ class NunchukImpl : public Nunchuk {
       AddressType address_type, const std::string& description = {},
       bool allow_used_signer = false,
       const std::string& decoy_pin = {}) override;
-  std::string GetHotWalletMnemonic(const std::string& wallet_id,
-                                   const std::string& passphrase = {}) override;
-  std::string GetHotKeyMnemonic(const std::string& signer_id,
-                                const std::string& passphrase = {}) override;
+  std::string GetUnbackedUpWalletMnemonic(
+      const std::string& wallet_id,
+      const std::string& passphrase = {}) override;
+  std::string GetUnbackedUpKeyMnemonic(
+      const std::string& signer_id,
+      const std::string& passphrase = {}) override;
   std::string DraftWallet(
       const std::string& name, int m, int n,
       const std::vector<SingleSigner>& signers, AddressType address_type,
