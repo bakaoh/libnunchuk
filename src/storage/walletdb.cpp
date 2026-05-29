@@ -1154,6 +1154,7 @@ Transaction NunchukWalletDb::CreateLiquidTransaction(
   tx.set_subtract_fee_from_amount(false);
   tx.set_receive(false);
   tx.set_sub_amount(0);
+  tx.set_signer(wally_signer_->GetMasterFingerprint(), false);
   if (!memo.empty()) tx.set_memo(memo);
   return tx;
 }

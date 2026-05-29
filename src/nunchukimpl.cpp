@@ -3320,6 +3320,7 @@ std::vector<SingleSigner> NunchukImpl::GetTransactionSigners(
     const std::string& wallet_id, const std::string& tx_id) {
   auto wallet = GetWallet(wallet_id);
   auto tx = GetTransaction(wallet_id, tx_id);
+  if (wallet.get_wallet_type() == WalletType::LIQUID) return tx.get_signed();
   if (!tx.get_psbt().empty()) return tx.get_signed();
   auto utxos = GetCoinsFromTxInputs(wallet_id, tx.get_inputs());
   return GetRawTxSigners(tx.get_raw(), utxos, wallet);
