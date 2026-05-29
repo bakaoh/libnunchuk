@@ -53,7 +53,7 @@ struct LiquidUtxos {
 
 struct AddressDetail {
   std::vector<uint32_t> keypath;  // full path from master to signing key
-  uint32_t index;                   // leaf index (equals keypath.back())
+  uint32_t index;                 // leaf index (equals keypath.back())
   std::string address;
   bool isChange;
 };
@@ -131,13 +131,14 @@ class WallySigner {
         throw std::runtime_error("Signing key not found");
       }
       const auto& detail = spk_.at(utxo_script);
-      const auto& [signingPrivKey, signingPubKey] = GetSigningKey(detail.keypath);
+      const auto& [signingPrivKey, signingPubKey] =
+          GetSigningKey(detail.keypath);
       std::vector<unsigned char> pubkeyhash(HASH160_LEN);
       CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
                                 pubkeyhash.data(), pubkeyhash.size()));
       // P2WPKH scriptPubKey: OP_0 PUSH20 <hash160(pubkey)>
-      if (utxo_script.size() != 2 + HASH160_LEN ||
-          utxo_script[0] != 0x00 || utxo_script[1] != HASH160_LEN ||
+      if (utxo_script.size() != 2 + HASH160_LEN || utxo_script[0] != 0x00 ||
+          utxo_script[1] != HASH160_LEN ||
           std::memcmp(utxo_script.data() + 2, pubkeyhash.data(), HASH160_LEN) !=
               0) {
         throw std::runtime_error(
@@ -368,7 +369,13 @@ class WallySigner {
       }
       std::vector<unsigned char> script(txout.script,
                                         txout.script + txout.script_len);
-      if (!spk_.contains(script)) continue;
+      if (!spk_.contains(script)) {
+        TxOutput output{WallyUtils::GetAddressFromScriptPubkey(script), 0};
+        output.isChange = false;
+        output.isReceive = false;
+        rs.add_output(output);
+        continue;
+      }
       auto privateBlindingKey = GetBlindingKey(script);
 
       std::vector<unsigned char> nonce(txout.nonce,
@@ -429,8 +436,8 @@ class WallySigner {
       rs.add_output(output);
     }
     if (explicit_fee_sats > 0) {
-      const size_t vsize = all_signed ? ComputeVsizeFromTx(tx)
-                                      : ComputeSignedVsize(txHex);
+      const size_t vsize =
+          all_signed ? ComputeVsizeFromTx(tx) : ComputeSignedVsize(txHex);
       rs.set_fee(Amount(explicit_fee_sats));
       rs.set_vsize(static_cast<int>(vsize));
       if (vsize > 0) {
@@ -1205,7 +1212,8 @@ class WallySigner {
            0;
   }
 
-  // Vsize of an on-wire tx (witness already present). Applies Elements discount.
+  // Vsize of an on-wire tx (witness already present). Applies Elements
+  // discount.
   static size_t ComputeVsizeFromTx(struct wally_tx* tx) {
     size_t weight = 0;
     CHECK_WALLY(wally_tx_get_weight(tx, &weight));

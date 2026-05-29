@@ -1434,6 +1434,7 @@ Transaction NunchukStorage::CreateLiquidTransaction(
   auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
   auto tx = db.CreateLiquidTransaction(outputs, fee_rate, memo,
                                        /*persist=*/true);
+  db.FillSendReceiveData(tx);
   GetAppStateDb(chain).RemoveDeletedTransaction(tx.get_txid());
   return tx;
 }
@@ -1444,8 +1445,10 @@ Transaction NunchukStorage::DraftLiquidTransaction(
     Amount fee_rate) {
   std::shared_lock<std::shared_mutex> lock(access_);
   auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
-  return db.CreateLiquidTransaction(outputs, fee_rate, /*memo=*/{},
+  auto tx = db.CreateLiquidTransaction(outputs, fee_rate, /*memo=*/{},
                                     /*persist=*/false);
+  db.FillSendReceiveData(tx);
+  return tx;
 }
 
 Transaction NunchukStorage::SignLiquidTransaction(Chain chain,
@@ -1453,7 +1456,9 @@ Transaction NunchukStorage::SignLiquidTransaction(Chain chain,
                                                   const std::string& tx_id) {
   std::unique_lock<std::shared_mutex> lock(access_);
   auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
-  return db.SignLiquidTransaction(tx_id);
+  auto tx = db.SignLiquidTransaction(tx_id);
+  db.FillSendReceiveData(tx);
+  return tx;
 }
 
 bool NunchukStorage::UpdatePsbt(Chain chain, const std::string& wallet_id,

@@ -165,6 +165,16 @@ class WallyUtils {
     spk.resize(spk_len);
     return spk;
   }
+
+  static std::string GetAddressFromScriptPubkey(
+      const std::vector<unsigned char>& spk) {
+    char* address = nullptr;
+    CHECK_WALLY(wally_addr_segwit_from_bytes(spk.data(), spk.size(),
+                                             C().ADDRESS_FAMILY, 0, &address));
+    std::string rs = std::string(address);
+    wally_free_string(address);
+    return rs;
+  }
 };
 }  // namespace nunchuk::wally
 
