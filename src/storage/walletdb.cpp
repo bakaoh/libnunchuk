@@ -1664,45 +1664,32 @@ void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
         send_index = i;
       }
     }
-    if (send_count == 1) {
-      std::map<AssetId, Amount> asset_amounts{};
-      for (auto& input : tx.get_inputs()) {
-        try {
-          auto prev_tx = GetTransaction(input.txid);
-          auto& prev_out = prev_tx.get_outputs()[input.vout];
-          asset_amounts[prev_out.assetId] += prev_out.amount;
-        } catch (StorageException& se) {
-          if (se.code() != StorageException::TX_NOT_FOUND) throw;
-        }
-      }
-      if (asset_amounts.size() == 0) {
-        tx.set_receive(true);
-      } else if (asset_amounts.size() == 1) {
-        AssetId asset_id = wally::WallyUtils::C().LBTC_ASSET_ID;
-        Amount send_amount = 0;
-        for (auto& output : tx.mutable_outputs()) {
-          if (output.isReceive && output.assetId == asset_id) {
-            send_amount += output.amount;
-          }
-        }
-        tx.set_receive(false);
-        tx.mutable_outputs()[send_index].amount =
-            asset_amounts[asset_id] - send_amount - tx.get_fee();
-        tx.mutable_outputs()[send_index].assetId = asset_id;
-      } else if (asset_amounts.size() == 2) {
-        AssetId asset_id = wally::WallyUtils::C().USDT_ASSET_ID;
-        Amount send_amount = 0;
-        for (auto& output : tx.mutable_outputs()) {
-          if (output.isReceive && output.assetId == asset_id) {
-            send_amount += output.amount;
-          }
-        }
-        tx.set_receive(false);
-        tx.mutable_outputs()[send_index].amount =
-            asset_amounts[asset_id] - send_amount;
-        tx.mutable_outputs()[send_index].assetId = asset_id;
+    std::map<AssetId, Amount> asset_amounts{};
+    for (auto& input : tx.get_inputs()) {
+      try {
+        auto prev_tx = GetTransaction(input.txid);
+        auto& prev_out = prev_tx.get_outputs()[input.vout];
+        asset_amounts[prev_out.assetId] += prev_out.amount;
+      } catch (StorageException& se) {
+        if (se.code() != StorageException::TX_NOT_FOUND) throw;
       }
     }
+    tx.set_receive(asset_amounts.size() == 0);
+    if (send_count != 1) return;
+    AssetId asset_id = asset_amounts.size() == 1
+                           ? wally::WallyUtils::C().LBTC_ASSET_ID
+                           : wally::WallyUtils::C().USDT_ASSET_ID;
+    Amount send_amount = asset_amounts[asset_id];
+    for (auto& output : tx.mutable_outputs()) {
+      if (output.isReceive && output.assetId == asset_id) {
+        send_amount -= output.amount;
+      }
+    }
+    if (asset_id == wally::WallyUtils::C().LBTC_ASSET_ID) {
+      send_amount -= tx.get_fee();
+    }
+    tx.mutable_outputs()[send_index].amount = send_amount;
+    tx.mutable_outputs()[send_index].assetId = asset_id;
     return;
   }
   auto allAddr = GetAllAddressData();
