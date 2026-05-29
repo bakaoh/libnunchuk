@@ -52,7 +52,8 @@ struct LiquidUtxos {
 };
 
 struct AddressDetail {
-  uint32_t index;
+  std::vector<uint32_t> keypath;  // full path from master to signing key
+  uint32_t index;                   // leaf index (equals keypath.back())
   std::string address;
   bool isChange;
 };
@@ -129,11 +130,19 @@ class WallySigner {
       if (!spk_.contains(utxo_script)) {
         throw std::runtime_error("Signing key not found");
       }
-      uint32_t index = spk_[utxo_script].index;
-      const auto& [signingPrivKey, signingPubKey] = GetSigningKey(index);
+      const auto& detail = spk_.at(utxo_script);
+      const auto& [signingPrivKey, signingPubKey] = GetSigningKey(detail.keypath);
       std::vector<unsigned char> pubkeyhash(HASH160_LEN);
       CHECK_WALLY(wally_hash160(signingPubKey.data(), signingPubKey.size(),
                                 pubkeyhash.data(), pubkeyhash.size()));
+      // P2WPKH scriptPubKey: OP_0 PUSH20 <hash160(pubkey)>
+      if (utxo_script.size() != 2 + HASH160_LEN ||
+          utxo_script[0] != 0x00 || utxo_script[1] != HASH160_LEN ||
+          std::memcmp(utxo_script.data() + 2, pubkeyhash.data(), HASH160_LEN) !=
+              0) {
+        throw std::runtime_error(
+            "Signing key does not match input scriptPubKey");
+      }
 
       std::vector<unsigned char> script_code(256);
       size_t script_code_len = 0;
@@ -243,7 +252,7 @@ class WallySigner {
       std::string address = GetAddress(keypath);
       std::string confidential_address =
           GetConfidentialAddressFromAddress(address);
-      AddressDetail detail{index, confidential_address, is_change};
+      AddressDetail detail{keypath, index, confidential_address, is_change};
       rs.push_back(detail);
       spk_.emplace(WallyUtils::GetScriptPubkeyFromAddress(address), detail);
       keypath.pop_back();
@@ -302,10 +311,14 @@ class WallySigner {
   }
 
   std::pair<std::vector<unsigned char>, std::vector<unsigned char>>
-  GetSigningKey(uint32_t index) {
+  GetSigningKey(const std::vector<uint32_t>& keypath) {
+    if (keypath.empty()) {
+      throw std::runtime_error("GetSigningKey: empty keypath");
+    }
     struct ext_key* derived = nullptr;
-    CHECK_WALLY(bip32_key_from_parent_alloc(master_, index,
-                                            BIP32_FLAG_KEY_PRIVATE, &derived));
+    CHECK_WALLY(bip32_key_from_parent_path_alloc(
+        master_, keypath.data(), keypath.size(), BIP32_FLAG_KEY_PRIVATE,
+        &derived));
 
     std::vector<unsigned char> signing_priv_key(EC_PRIVATE_KEY_LEN);
     std::memcpy(signing_priv_key.data(), derived->priv_key + 1,
@@ -314,6 +327,7 @@ class WallySigner {
     CHECK_WALLY(wally_ec_public_key_from_private_key(
         signing_priv_key.data(), signing_priv_key.size(),
         signing_pub_key.data(), signing_pub_key.size()));
+    bip32_key_free(derived);
     return {signing_priv_key, signing_pub_key};
   }
 
