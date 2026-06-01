@@ -1746,8 +1746,10 @@ void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
     for (size_t i = 0; i < outputs.size(); i++) {
       auto& output = outputs[i];
       total_amount -= output.amount;
+      output.isReceive = true;
       if (!isMyAddress(output.address)) {
         send_amount += output.amount;
+        output.isReceive = false;
       } else if (!output.isChange && isMyChange(output.address)) {
         output.isChange = true;
       }
