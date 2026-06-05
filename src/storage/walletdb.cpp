@@ -1665,17 +1665,19 @@ void NunchukWalletDb::FillSendReceiveData(Transaction& tx) {
       }
     }
     std::map<AssetId, Amount> asset_amounts{};
+    bool is_receive = true;
     for (auto& input : tx.get_inputs()) {
       try {
         auto prev_tx = GetTransaction(input.txid);
         auto& prev_out = prev_tx.get_outputs()[input.vout];
         asset_amounts[prev_out.assetId] += prev_out.amount;
+        is_receive &= prev_out.amount == 0;
       } catch (StorageException& se) {
         if (se.code() != StorageException::TX_NOT_FOUND) throw;
       }
     }
-    tx.set_receive(asset_amounts.size() == 0);
-    if (send_count != 1) return;
+    tx.set_receive(is_receive);
+    if (is_receive || send_count != 1) return;
     AssetId asset_id = asset_amounts.size() == 1
                            ? wally::WallyUtils::C().LBTC_ASSET_ID
                            : wally::WallyUtils::C().USDT_ASSET_ID;
