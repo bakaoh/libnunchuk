@@ -1258,6 +1258,9 @@ std::vector<Transaction> NunchukStorage::GetTransactions(
   auto db = GetWalletDb(chain, wallet_id);
   auto vtx = db.GetTransactions(count, skip);
   if (db.IsSupportLiquid()) {
+    for (auto&& tx : vtx) {
+      db.FillSendReceiveData(tx);
+    }
     return vtx;
   }
 
