@@ -31,6 +31,7 @@
 #include <utils/multisigconfig.hpp>
 #include <utils/unchained.hpp>
 #include <utils/txutils.hpp>
+#include <utils/trezor.hpp>
 #include <storage/storage.h>
 #include <hwiservice.h>
 
@@ -1656,6 +1657,51 @@ std::vector<std::string> Utils::ParseSignerNames(
   getKeynames(script_node);
   std::sort(names.begin() + keypath_m, names.end());
   return names;
+}
+
+std::string Utils::TrezorGetPublicKey(WalletType wallet_type,
+                                      AddressType address_type, int index) {
+  return nunchuk::TrezorGetPublicKey(wallet_type, address_type, index);
+}
+
+SingleSigner Utils::TrezorParsePublicKeyResponse(const std::string& response) {
+  return nunchuk::TrezorParsePublicKeyResponse(response);
+}
+
+std::string Utils::TrezorSignTransaction(const Wallet& wallet,
+                                         const std::string& psbt,
+                                         const std::string& xfp) {
+  return nunchuk::TrezorSignTransaction(wallet, psbt, xfp);
+}
+
+std::string Utils::TrezorParseSignTransactionResponse(
+    const Wallet& wallet, const std::string& psbt, const std::string& xfp,
+    const std::string& response) {
+  return nunchuk::TrezorParseSignTransactionResponse(wallet, psbt, xfp,
+                                                     response);
+}
+
+std::string Utils::TrezorSignMessage(const SingleSigner& signer,
+                                     const std::string& message) {
+  return nunchuk::TrezorSignMessage(signer, message);
+}
+
+std::string Utils::TrezorGetSignMessagePath(const SingleSigner& signer) {
+  return nunchuk::TrezorGetSignMessagePath(signer);
+}
+
+std::pair<std::string, std::string> Utils::TrezorParseSignMessage(const std::string& response) {
+  return nunchuk::TrezorParseSignMessage(response);
+}
+
+std::string Utils::TrezorGetAddress(const Wallet& wallet,
+                                    const std::string& address,
+                                    const std::string& path) {
+  return nunchuk::TrezorGetAddress(wallet, address, path);
+}
+
+std::string Utils::TrezorParseGetAddress(const std::string& response) {
+  return nunchuk::TrezorParseGetAddress(response);
 }
 
 AssetId Utils::GetUSDTAssetId() {

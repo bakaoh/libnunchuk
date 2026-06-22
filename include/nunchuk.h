@@ -1970,6 +1970,9 @@ class NUNCHUK_EXPORT Nunchuk {
                            const std::string& address) = 0;
   virtual std::string GetAddressPath(const std::string& wallet_id,
                                      const std::string& address) = 0;
+  virtual std::string GetAddressPath(const std::string& wallet_id,
+                                     const std::string& address,
+                                     const SingleSigner& signer) = 0;
   virtual int GetAddressIndex(const std::string& wallet_id,
                               const std::string& address) = 0;
   virtual std::vector<std::vector<UnspentOutput>> GetCoinAncestry(
@@ -2496,6 +2499,26 @@ class NUNCHUK_EXPORT Utils {
       const std::string& script_template, int& keypath_m);
   static AssetId GetUSDTAssetId();
   static AssetId GetLBTCAssetId();
+
+  // Trezor
+  static std::string TrezorGetPublicKey(WalletType wallet_type,
+                                        AddressType address_type, int index);
+  static SingleSigner TrezorParsePublicKeyResponse(const std::string& response);
+  static std::string TrezorSignTransaction(const Wallet& wallet,
+                                           const std::string& psbt,
+                                           const std::string& xfp);
+  static std::string TrezorParseSignTransactionResponse(
+      const Wallet& wallet, const std::string& psbt, const std::string& xfp,
+      const std::string& response);
+  static std::string TrezorSignMessage(const SingleSigner& signer,
+                                       const std::string& message);
+  static std::string TrezorGetSignMessagePath(const SingleSigner& signer);
+  static std::pair<std::string, std::string> TrezorParseSignMessage(
+      const std::string& response);
+  static std::string TrezorGetAddress(const Wallet& wallet,
+                                      const std::string& address,
+                                      const std::string& path);
+  static std::string TrezorParseGetAddress(const std::string& response);
 
  private:
   Utils() {}

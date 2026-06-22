@@ -1047,21 +1047,43 @@ HealthStatus NunchukImpl::HealthCheckSingleSigner(
                            "Message too short!");
   }
 
-  std::string address;
+  std::string pkh_address;
   if (signer.get_public_key().empty()) {
     std::string descriptor = GetPkhDescriptor(signer.get_xpub());
-    address = CoreUtils::getInstance().DeriveAddress(descriptor);
+    pkh_address = CoreUtils::getInstance().DeriveAddress(descriptor);
   } else {
     CPubKey pubkey(ParseHex(signer.get_public_key()));
-    address = EncodeDestination(PKHash(pubkey.GetID()));
+    pkh_address = EncodeDestination(PKHash(pubkey.GetID()));
   }
 
-  if (CoreUtils::getInstance().VerifyMessage(address, signature, message)) {
-    storage_->SetHealthCheckSuccess(chain_, signer);
-    return HealthStatus::SUCCESS;
-  } else {
-    return HealthStatus::SIGNATURE_INVALID;
+  std::vector<std::string> addresses{pkh_address};
+
+  if (auto pubkey = DecodeExtPubKey(signer.get_xpub());
+      pubkey.Derive(pubkey, 0) && pubkey.Derive(pubkey, 0)) {
+    for (auto address_type :
+         {AddressType::NATIVE_SEGWIT, AddressType::NESTED_SEGWIT,
+          AddressType::TAPROOT}) {
+      auto derived_signer = SingleSigner(
+          signer.get_name(), EncodeExtPubKey(pubkey), signer.get_public_key(),
+          signer.get_derivation_path() + "/0/0",
+          signer.get_external_internal_index(), signer.get_master_fingerprint(),
+          signer.get_last_health_check());
+      auto descriptor = GetDescriptor(derived_signer, address_type);
+      addresses.push_back(CoreUtils::getInstance().DeriveAddress(descriptor));
+    }
   }
+
+  for (auto&& address : addresses) {
+    try {
+      if (CoreUtils::getInstance().VerifyMessage(address, signature, message)) {
+        storage_->SetHealthCheckSuccess(chain_, signer);
+        return HealthStatus::SUCCESS;
+      }
+    } catch (...) {
+      // ignored
+    }
+  }
+  return HealthStatus::SIGNATURE_INVALID;
 }
 
 std::vector<Transaction> NunchukImpl::GetTransactionHistory(
@@ -2801,6 +2823,12 @@ bool NunchukImpl::IsMyAddress(const std::string& wallet_id,
 std::string NunchukImpl::GetAddressPath(const std::string& wallet_id,
                                         const std::string& address) {
   return storage_->GetAddressPath(chain_, wallet_id, address);
+}
+
+std::string NunchukImpl::GetAddressPath(const std::string& wallet_id,
+                                        const std::string& address,
+                                        const SingleSigner& signer) {
+  return storage_->GetAddressPath(chain_, wallet_id, address, signer);
 }
 
 int NunchukImpl::GetAddressIndex(const std::string& wallet_id,

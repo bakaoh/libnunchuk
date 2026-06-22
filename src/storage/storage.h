@@ -317,6 +317,9 @@ class NunchukStorage {
                    const std::string &address);
   std::string GetAddressPath(Chain chain, const std::string &wallet_id,
                              const std::string &address);
+  std::string GetAddressPath(Chain chain, const std::string &wallet_id,
+                             const std::string &address,
+                             const SingleSigner &signer);
   std::vector<std::vector<UnspentOutput>> GetAncestry(
       Chain chain, const std::string &wallet_id, const std::string &tx_id,
       int vout);

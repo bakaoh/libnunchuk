@@ -570,6 +570,9 @@ class NunchukImpl : public Nunchuk {
                    const std::string& address) override;
   std::string GetAddressPath(const std::string& wallet_id,
                              const std::string& address) override;
+  std::string GetAddressPath(const std::string& wallet_id,
+                             const std::string& address,
+                             const SingleSigner& signer) override;
   int GetAddressIndex(const std::string& wallet_id,
                       const std::string& address) override;
 

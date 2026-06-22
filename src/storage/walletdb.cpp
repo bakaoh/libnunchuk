@@ -427,6 +427,30 @@ std::string NunchukWalletDb::GetAddressPath(const std::string& address) {
   return path.str();
 }
 
+std::string NunchukWalletDb::GetAddressPath(const std::string& address,
+                                            const SingleSigner& signer) {
+  auto all = GetAllAddressData();
+  if (!all.count(address)) {
+    throw StorageException(StorageException::ADDRESS_NOT_FOUND,
+                           "Address not found!");
+  }
+
+  const auto signer_key = GetSingleSignerKey(signer);
+  for (auto&& wallet_signer : GetSigners()) {
+    if (GetSingleSignerKey(wallet_signer) != signer_key) continue;
+
+    const auto data = all.at(address);
+    auto eii = wallet_signer.get_external_internal_index();
+    std::stringstream path;
+    path << "m" << FormalizePath(wallet_signer.get_derivation_path()) << "/"
+         << (data.internal ? eii.second : eii.first) << "/" << data.index;
+    return path.str();
+  }
+
+  throw StorageException(StorageException::SIGNER_NOT_FOUND,
+                         "Signer not found!");
+}
+
 bool NunchukWalletDb::IsMyChange(const std::string& address) {
   auto all = GetAllAddressData();
   return all.count(address) && all.at(address).internal;

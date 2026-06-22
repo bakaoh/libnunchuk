@@ -2233,6 +2233,14 @@ std::string NunchukStorage::GetAddressPath(Chain chain,
   return GetWalletDb(chain, wallet_id).GetAddressPath(address);
 }
 
+std::string NunchukStorage::GetAddressPath(Chain chain,
+                                           const std::string& wallet_id,
+                                           const std::string& address,
+                                           const SingleSigner& signer) {
+  std::shared_lock<std::shared_mutex> lock(access_);
+  return GetWalletDb(chain, wallet_id).GetAddressPath(address, signer);
+}
+
 std::vector<std::vector<UnspentOutput>> NunchukStorage::GetAncestry(
     Chain chain, const std::string& wallet_id, const std::string& tx_id,
     int vout) {

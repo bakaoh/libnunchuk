@@ -152,6 +152,8 @@ class NunchukWalletDb : public NunchukDb {
 
   bool IsMyAddress(const std::string &address);
   std::string GetAddressPath(const std::string &address);
+  std::string GetAddressPath(const std::string &address,
+                             const SingleSigner &signer);
   std::vector<UnspentOutput> GetCoins();
   std::vector<std::vector<UnspentOutput>> GetAncestry(const std::string &tx_id,
                                                       int vout);
