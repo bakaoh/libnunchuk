@@ -82,6 +82,9 @@ class NunchukWalletDb : public NunchukDb {
   Transaction CreateLiquidTransaction(
       const std::map<AssetId, std::map<std::string, Amount>> &outputs,
       Amount fee_rate, const std::string &memo, bool persist = true);
+  Amount EstimateFeeForLiquidTransaction(
+      const std::map<AssetId, std::map<std::string, Amount>> &outputs,
+      Amount fee_rate);
 
   // Sign a previously-persisted unsigned Liquid transaction in-place. Loads
   // raw hex by tx_id, rebuilds prevout data from wallet UTXOs, signs via the
@@ -194,6 +197,10 @@ class NunchukWalletDb : public NunchukDb {
   Transaction GetTransactionFromVtxValue(const std::string &value,
                                          const nunchuk::Wallet &wallet,
                                          int height);
+  void PrepareLiquidTransaction(
+      const std::map<AssetId, std::map<std::string, Amount>> &outputs,
+      Amount fee_rate, bool allow_insufficient_lbtc, std::string *unsigned_hex,
+      uint64_t &fee_sats);
 
   static std::map<std::string, std::map<std::string, AddressData>> addr_cache_;
   static std::map<std::string, std::vector<SingleSigner>> signer_cache_;

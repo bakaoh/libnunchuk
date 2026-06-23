@@ -1454,6 +1454,15 @@ Transaction NunchukStorage::DraftLiquidTransaction(
   return tx;
 }
 
+Amount NunchukStorage::EstimateFeeForLiquidTransaction(
+    Chain chain, const std::string& wallet_id,
+    const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+    Amount fee_rate) {
+  std::shared_lock<std::shared_mutex> lock(access_);
+  return GetLiquidSupportedWalletDb(chain, wallet_id)
+      .EstimateFeeForLiquidTransaction(outputs, fee_rate);
+}
+
 Transaction NunchukStorage::SignLiquidTransaction(Chain chain,
                                                   const std::string& wallet_id,
                                                   const std::string& tx_id) {

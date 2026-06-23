@@ -766,6 +766,10 @@ class NunchukImpl : public Nunchuk {
       const std::string& wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>>& outputs,
       Amount fee_rate = -1) override;
+  Amount EstimateFeeForLiquidTransaction(
+      const std::string& wallet_id,
+      const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+      Amount fee_rate = -1) override;
   Transaction SignLiquidTransaction(const std::string& wallet_id,
                                     const std::string& tx_id,
                                     const Device& device) override;

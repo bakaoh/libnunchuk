@@ -3412,6 +3412,15 @@ Transaction NunchukImpl::DraftLiquidTransaction(
   return storage_->DraftLiquidTransaction(chain_, wallet_id, outputs, fee_rate);
 }
 
+Amount NunchukImpl::EstimateFeeForLiquidTransaction(
+    const std::string& wallet_id,
+    const std::map<AssetId, std::map<std::string, Amount>>& outputs,
+    Amount fee_rate) {
+  if (fee_rate <= 0) fee_rate = EstimateFee();
+  return storage_->EstimateFeeForLiquidTransaction(chain_, wallet_id, outputs,
+                                                   fee_rate);
+}
+
 Transaction NunchukImpl::SignLiquidTransaction(const std::string& wallet_id,
                                                const std::string& tx_id,
                                                const Device& /*device*/) {
