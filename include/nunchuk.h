@@ -79,6 +79,7 @@ struct TxOutput {
   bool isReceive{false};
   Amount userAmount{0};
   AssetId assetId{};
+  uint32_t vout{0};
 
   TxOutput() = default;
   TxOutput(const std::string& address, Amount amount)
@@ -87,7 +88,8 @@ struct TxOutput {
   bool operator==(const TxOutput& other) const {
     return address == other.address && amount == other.amount &&
            isChange == other.isChange && isReceive == other.isReceive &&
-           userAmount == other.userAmount && assetId == other.assetId;
+           userAmount == other.userAmount && assetId == other.assetId &&
+           vout == other.vout;
   }
   bool operator!=(const TxOutput& other) const { return !(*this == other); }
 };

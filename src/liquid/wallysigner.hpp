@@ -373,6 +373,7 @@ class WallySigner {
         TxOutput output{WallyUtils::GetAddressFromScriptPubkey(script), 0};
         output.isChange = false;
         output.isReceive = false;
+        output.vout = static_cast<uint32_t>(vout);
         rs.add_output(output);
         continue;
       }
@@ -433,6 +434,7 @@ class WallySigner {
       output.isChange = address_detail.isChange;
       output.isReceive = true;
       output.assetId = AssetId(asset_id.begin(), asset_id.end());
+      output.vout = static_cast<uint32_t>(vout);
       rs.add_output(output);
     }
     if (explicit_fee_sats > 0) {
@@ -609,7 +611,8 @@ class WallySigner {
   //                     followed by a change output if leftover > 0.
   std::string CreateTx(const std::vector<LiquidUtxos>& inputs,
                        const AssetDestinations& destinations,
-                       const std::string& changeConfAddr, uint64_t feeSats) {
+                       const std::string& changeConfAddr, uint64_t feeSats,
+                       bool skip_balance_check = false) {
     if (inputs.empty()) throw std::runtime_error("inputs must be non-empty");
     if (destinations.empty())
       throw std::runtime_error("destinations must be non-empty");
@@ -713,18 +716,21 @@ class WallySigner {
     }
 
     if (!plans.contains(LBTC)) {
-      throw std::runtime_error("No LBTC inputs available to pay fee");
+      if (!skip_balance_check) {
+        throw std::runtime_error("No LBTC inputs available to pay fee");
+      }
+      plans.emplace(LBTC, AssetPlan{});
     }
     plans[LBTC].fee_part = feeSats;
 
     for (auto& [asset, p] : plans) {
       const uint64_t out_total = p.total_dest + p.fee_part;
-      if (out_total > p.total_in) {
+      if (!skip_balance_check && out_total > p.total_in) {
         throw std::runtime_error(
             "Insufficient inputs for an asset (destinations + fee exceed "
             "inputs)");
       }
-      p.change = p.total_in - out_total;
+      p.change = p.total_in > out_total ? p.total_in - out_total : 0;
       p.has_change = p.change > 0;
       if (p.has_change && changeConfAddr.empty()) {
         throw std::runtime_error(
@@ -733,7 +739,9 @@ class WallySigner {
       // Need at least one blinded output per asset to balance random input
       // vbfs; the explicit fee output is unblinded so it doesn't count.
       const bool has_blinded_out = !p.dests.empty() || p.has_change;
-      if (!has_blinded_out) {
+      const bool has_inputs =
+          asset_input_idx.count(asset) && !asset_input_idx.at(asset).empty();
+      if (has_inputs && !has_blinded_out) {
         throw std::runtime_error(
             "Asset has confidential inputs but no blinded outputs to balance "
             "(provide a destination or accept change for this asset)");
@@ -1320,9 +1328,10 @@ class WallySigner {
                              const AssetDestinations& destinations,
                              const std::string& changeConfAddr,
                              uint64_t feeSatsHint = 1,
-                             size_t witness_wu_per_input = kP2WPKHWitnessWU) {
-    const std::string placeholder_hex =
-        CreateTx(inputs, destinations, changeConfAddr, feeSatsHint);
+                             size_t witness_wu_per_input = kP2WPKHWitnessWU,
+                             bool skip_balance_check = false) {
+    const std::string placeholder_hex = CreateTx(
+        inputs, destinations, changeConfAddr, feeSatsHint, skip_balance_check);
     return ComputeSignedVsize(placeholder_hex, witness_wu_per_input);
   }
 
