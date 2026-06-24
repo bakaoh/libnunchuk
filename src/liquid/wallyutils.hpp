@@ -93,9 +93,11 @@ class WallyUtils {
   }
 
   static std::vector<unsigned char> RandomBytes(size_t n) {
-    static std::mt19937 gen(1);
     std::vector<unsigned char> out(n);
-    for (size_t i = 0; i < n; i++) out[i] = static_cast<unsigned char>(gen());
+    std::random_device rd;
+    for (size_t i = 0; i < n; i++) {
+      out[i] = static_cast<unsigned char>(rd());
+    }
     return out;
   }
 

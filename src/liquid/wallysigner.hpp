@@ -792,7 +792,8 @@ class WallySigner {
       }
     }
 
-    for (const auto& [asset, blinded_idxs] : asset_blinded_outs) {
+    auto recompute_asset_vbf_final = [&](const AssetId& asset) {
+      const auto& blinded_idxs = asset_blinded_outs.at(asset);
       const auto& input_idxs = asset_input_idx.at(asset);
 
       std::vector<uint64_t> values;
@@ -808,17 +809,16 @@ class WallySigner {
       const size_t num_inputs_a = input_idxs.size();
 
       if (asset == LBTC) {
-        // Explicit fee output participates with abf=0, vbf=0.
         values.push_back(feeSats);
         abfs.insert(abfs.end(), ZERO32.begin(), ZERO32.end());
         vbfs.insert(vbfs.end(), ZERO32.begin(), ZERO32.end());
       }
       for (size_t k = 0; k < blinded_idxs.size(); ++k) {
-        const auto& o = outs[blinded_idxs[k]];
-        values.push_back(o.value);
-        abfs.insert(abfs.end(), o.abf.begin(), o.abf.end());
+        const auto& planned = outs[blinded_idxs[k]];
+        values.push_back(planned.value);
+        abfs.insert(abfs.end(), planned.abf.begin(), planned.abf.end());
         if (k + 1 < blinded_idxs.size()) {
-          vbfs.insert(vbfs.end(), o.vbf.begin(), o.vbf.end());
+          vbfs.insert(vbfs.end(), planned.vbf.begin(), planned.vbf.end());
         }
       }
 
@@ -827,6 +827,10 @@ class WallySigner {
           values.data(), values.size(), num_inputs_a, abfs.data(), abfs.size(),
           vbfs.data(), vbfs.size(), vbf_final.data(), vbf_final.size()));
       outs[blinded_idxs.back()].vbf = vbf_final;
+    };
+
+    for (const auto& [asset, _] : asset_blinded_outs) {
+      recompute_asset_vbf_final(asset);
     }
 
     // Surjection proof candidates: all inputs in their tx order.
@@ -848,7 +852,8 @@ class WallySigner {
     CHECK_WALLY(
         wally_tx_init_alloc(2, 0, all_inputs.size(), outs.size(), &output_tx));
 
-    for (const auto& o : outs) {
+    for (size_t out_idx = 0; out_idx < outs.size(); ++out_idx) {
+      PlannedOutput& o = outs[out_idx];
       if (o.explicit_fee) {
         std::vector<unsigned char> fee_asset(1 + 32);
         fee_asset[0] = 0x01;
@@ -869,50 +874,88 @@ class WallySigner {
       const auto script_pubkey =
           WallyUtils::GetScriptPubkeyFromConfidentialAddress(o.conf_addr);
 
+      bool output_built = false;
       std::vector<unsigned char> generator(ASSET_GENERATOR_LEN);
-      CHECK_WALLY(wally_asset_generator_from_bytes(
-          o.asset_id.data(), o.asset_id.size(), o.abf.data(), o.abf.size(),
-          generator.data(), generator.size()));
-
       std::vector<unsigned char> value_commitment_out(ASSET_COMMITMENT_LEN);
-      CHECK_WALLY(wally_asset_value_commitment(
-          o.value, o.vbf.data(), o.vbf.size(), generator.data(),
-          generator.size(), value_commitment_out.data(),
-          value_commitment_out.size()));
-
-      auto eph_priv = WallyUtils::RandomEcPrivateKey();
       std::vector<unsigned char> eph_pub(EC_PUBLIC_KEY_LEN);
-      CHECK_WALLY(wally_ec_public_key_from_private_key(
-          eph_priv.data(), eph_priv.size(), eph_pub.data(), eph_pub.size()));
+      std::vector<unsigned char> rangeproof;
+      std::vector<unsigned char> surj;
 
-      std::vector<unsigned char> rangeproof(ASSET_RANGEPROOF_MAX_LEN);
-      size_t rangeproof_len = 0;
-      CHECK_WALLY(wally_asset_rangeproof(
-          o.value, blinding_pubkey.data(), blinding_pubkey.size(),
-          eph_priv.data(), eph_priv.size(), o.asset_id.data(),
-          o.asset_id.size(), o.abf.data(), o.abf.size(), o.vbf.data(),
-          o.vbf.size(), value_commitment_out.data(),
-          value_commitment_out.size(), script_pubkey.data(),
-          script_pubkey.size(), generator.data(), generator.size(), 1, 0, 36,
-          rangeproof.data(), rangeproof.size(), &rangeproof_len));
-      rangeproof.resize(rangeproof_len);
+      for (int asset_attempt = 0; asset_attempt < 100 && !output_built;
+           ++asset_attempt) {
+        if (asset_attempt > 0) {
+          o.abf = WallyUtils::RandomBytes(32);
+          recompute_asset_vbf_final(o.asset_id);
+        }
 
-      std::vector<unsigned char> surj(ASSET_SURJECTIONPROOF_MAX_LEN);
-      size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
-      auto surj_entropy = WallyUtils::RandomBytes(32);
-      CHECK_WALLY(wally_asset_surjectionproof(
-          o.asset_id.data(), o.asset_id.size(), o.abf.data(), o.abf.size(),
-          generator.data(), generator.size(), surj_entropy.data(),
-          surj_entropy.size(), surj_asset_ids.data(), surj_asset_ids.size(),
-          surj_abfs.data(), surj_abfs.size(), surj_asset_gens.data(),
-          surj_asset_gens.size(), surj.data(), surj.size(), &surj_len));
-      surj.resize(surj_len);
+        if (wally_asset_generator_from_bytes(
+                o.asset_id.data(), o.asset_id.size(), o.abf.data(),
+                o.abf.size(), generator.data(), generator.size()) != WALLY_OK) {
+          continue;
+        }
+        if (wally_asset_value_commitment(
+                o.value, o.vbf.data(), o.vbf.size(), generator.data(),
+                generator.size(), value_commitment_out.data(),
+                value_commitment_out.size()) != WALLY_OK) {
+          continue;
+        }
 
-      CHECK_WALLY(wally_tx_add_elements_raw_output(
-          output_tx, script_pubkey.data(), script_pubkey.size(),
-          generator.data(), generator.size(), value_commitment_out.data(),
-          value_commitment_out.size(), eph_pub.data(), eph_pub.size(),
-          surj.data(), surj.size(), rangeproof.data(), rangeproof.size(), 0));
+        for (int range_attempt = 0; range_attempt < 100 && !output_built;
+             ++range_attempt) {
+          auto eph_priv = WallyUtils::RandomEcPrivateKey();
+          if (wally_ec_public_key_from_private_key(
+                  eph_priv.data(), eph_priv.size(), eph_pub.data(),
+                  eph_pub.size()) != WALLY_OK) {
+            continue;
+          }
+
+          rangeproof.assign(ASSET_RANGEPROOF_MAX_LEN, 0);
+          size_t rangeproof_len = 0;
+          if (wally_asset_rangeproof(
+                  o.value, blinding_pubkey.data(), blinding_pubkey.size(),
+                  eph_priv.data(), eph_priv.size(), o.asset_id.data(),
+                  o.asset_id.size(), o.abf.data(), o.abf.size(), o.vbf.data(),
+                  o.vbf.size(), value_commitment_out.data(),
+                  value_commitment_out.size(), script_pubkey.data(),
+                  script_pubkey.size(), generator.data(), generator.size(), 1,
+                  0, 36, rangeproof.data(), rangeproof.size(),
+                  &rangeproof_len) != WALLY_OK) {
+            continue;
+          }
+          rangeproof.resize(rangeproof_len);
+
+          surj.assign(ASSET_SURJECTIONPROOF_MAX_LEN, 0);
+          size_t surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
+          int surj_ret = WALLY_ERROR;
+          for (int surj_attempt = 0; surj_attempt < 100 && surj_ret != WALLY_OK;
+               ++surj_attempt) {
+            auto surj_entropy = WallyUtils::RandomBytes(32);
+            surj_len = ASSET_SURJECTIONPROOF_MAX_LEN;
+            surj_ret = wally_asset_surjectionproof(
+                o.asset_id.data(), o.asset_id.size(), o.abf.data(),
+                o.abf.size(), generator.data(), generator.size(),
+                surj_entropy.data(), surj_entropy.size(), surj_asset_ids.data(),
+                surj_asset_ids.size(), surj_abfs.data(), surj_abfs.size(),
+                surj_asset_gens.data(), surj_asset_gens.size(), surj.data(),
+                surj.size(), &surj_len);
+          }
+          if (surj_ret != WALLY_OK) continue;
+
+          surj.resize(surj_len);
+          CHECK_WALLY(wally_tx_add_elements_raw_output(
+              output_tx, script_pubkey.data(), script_pubkey.size(),
+              generator.data(), generator.size(), value_commitment_out.data(),
+              value_commitment_out.size(), eph_pub.data(), eph_pub.size(),
+              surj.data(), surj.size(), rangeproof.data(), rangeproof.size(),
+              0));
+          output_built = true;
+        }
+      }
+
+      if (!output_built) {
+        throw std::runtime_error(
+            "Failed to build confidential Liquid output after retries");
+      }
     }
 
     for (const auto& ii : all_inputs) {
