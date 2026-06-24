@@ -1115,21 +1115,29 @@ void NunchukWalletDb::PrepareLiquidTransaction(
     return rs;
   };
 
-  // 7) Select non-LBTC assets first.
-  std::vector<size_t> selected;
-  for (const auto& [aid, target] : targets) {
-    if (aid == LBTC) continue;
-    if (allow_insufficient_lbtc) {
-      auto [sel, _] = select_for_asset_best_effort(aid, target);
-      selected.insert(selected.end(), sel.begin(), sel.end());
-    } else {
-      auto sel = select_for_asset(aid, target);
-      selected.insert(selected.end(), sel.begin(), sel.end());
+  // 7) Coin selection + fee computation.
+  auto select_non_lbtc = [&](bool best_effort) {
+    std::vector<size_t> picked;
+    for (const auto& [aid, target] : targets) {
+      if (aid == LBTC) continue;
+      if (best_effort) {
+        auto [sel, _] = select_for_asset_best_effort(aid, target);
+        picked.insert(picked.end(), sel.begin(), sel.end());
+      } else {
+        auto sel = select_for_asset(aid, target);
+        picked.insert(picked.end(), sel.begin(), sel.end());
+      }
     }
-  }
+    return picked;
+  };
 
-  if (!allow_insufficient_lbtc) {
-    // Create/draft path: keep the original coin-selection and fee logic.
+  struct StrictFeeResult {
+    uint64_t fee_sats;
+    std::vector<wally::LiquidUtxos> inputs;
+  };
+
+  auto compute_strict_fee =
+      [&](const std::vector<size_t>& non_lbtc_selected) -> StrictFeeResult {
     auto lbtc_it = coins_by_asset.find(LBTC);
     if (lbtc_it == coins_by_asset.end()) {
       throw NunchukException(NunchukException::COIN_SELECTION_ERROR,
@@ -1138,7 +1146,7 @@ void NunchukWalletDb::PrepareLiquidTransaction(
 
     uint64_t feeSats = 0;
     {
-      std::vector<size_t> trial = selected;
+      std::vector<size_t> trial = non_lbtc_selected;
       trial.insert(trial.end(), lbtc_it->second.begin(), lbtc_it->second.end());
       auto trial_inputs = build_inputs(trial);
       size_t vsize = wally_signer_->EstimateSignedVsize(
@@ -1150,7 +1158,7 @@ void NunchukWalletDb::PrepareLiquidTransaction(
     std::vector<size_t> lbtc_sel =
         select_for_asset(LBTC, targets[LBTC] + static_cast<Amount>(feeSats));
     auto with_lbtc = [&]() {
-      std::vector<size_t> all = selected;
+      std::vector<size_t> all = non_lbtc_selected;
       all.insert(all.end(), lbtc_sel.begin(), lbtc_sel.end());
       return all;
     };
@@ -1167,42 +1175,58 @@ void NunchukWalletDb::PrepareLiquidTransaction(
       }
       feeSats = refined;
     }
+    return {feeSats, std::move(final_inputs)};
+  };
 
-    fee_sats = feeSats;
+  auto compute_relaxed_fee =
+      [&](const std::vector<size_t>& non_lbtc_selected) -> uint64_t {
+    constexpr uint64_t kFeeHint = 0;
+    constexpr bool kSkipBalanceCheck = true;
+    const auto lbtc_it = coins_by_asset.find(LBTC);
+    auto add_extra_lbtc_input = [&](std::vector<size_t> indices) {
+      if (lbtc_it != coins_by_asset.end() && !lbtc_it->second.empty()) {
+        indices.push_back(lbtc_it->second.front());
+        return indices;
+      }
+      if (!coins.empty()) indices.push_back(0);
+      return indices;
+    };
+
+    std::vector<size_t> trial = non_lbtc_selected;
+    if (lbtc_it != coins_by_asset.end()) {
+      trial.insert(trial.end(), lbtc_it->second.begin(), lbtc_it->second.end());
+    }
+    trial = add_extra_lbtc_input(std::move(trial));
+    if (trial.empty() && !coins.empty()) trial.push_back(0);
+
+    const auto estimate_inputs = build_inputs(trial);
+    const size_t vsize = wally_signer_->EstimateSignedVsize(
+        estimate_inputs, destinations, change_addr, kFeeHint,
+        wally::WallySigner::kP2WPKHWitnessWU, kSkipBalanceCheck);
+    return wally::WallySigner::FeeSatsFromVsizeAndKvBRate(
+        vsize, static_cast<uint64_t>(fee_rate));
+  };
+
+  if (!allow_insufficient_lbtc) {
+    auto result = compute_strict_fee(select_non_lbtc(/*best_effort=*/false));
+    fee_sats = result.fee_sats;
     if (unsigned_hex != nullptr) {
-      *unsigned_hex = wally_signer_->CreateTx(final_inputs, destinations,
-                                              change_addr, feeSats);
+      *unsigned_hex = wally_signer_->CreateTx(result.inputs, destinations,
+                                              change_addr, result.fee_sats);
     }
     return;
   }
 
-  const auto lbtc_it = coins_by_asset.find(LBTC);
-  auto add_extra_lbtc_input = [&](std::vector<size_t> indices) {
-    if (lbtc_it != coins_by_asset.end() && !lbtc_it->second.empty()) {
-      indices.push_back(lbtc_it->second.front());
-      return indices;
-    }
-    if (!coins.empty()) indices.push_back(0);
-    return indices;
-  };
-
-  // Estimate-only path: size the tx with best-effort inputs, feeSatsHint=0, and
-  // one extra LBTC input when LBTC may be insufficient for the real fee.
-  constexpr uint64_t kFeeHint = 0;
-  constexpr bool kSkipBalanceCheck = true;
-  std::vector<size_t> trial = selected;
-  if (lbtc_it != coins_by_asset.end()) {
-    trial.insert(trial.end(), lbtc_it->second.begin(), lbtc_it->second.end());
+  // Estimate: match draft fee when coin selection succeeds; otherwise fall back
+  // to a relaxed sizing path that does not throw on insufficient LBTC.
+  try {
+    fee_sats = compute_strict_fee(select_non_lbtc(/*best_effort=*/false)).fee_sats;
+    return;
+  } catch (const NunchukException& e) {
+    if (e.code() != NunchukException::COIN_SELECTION_ERROR) throw;
+  } catch (const std::runtime_error&) {
   }
-  trial = add_extra_lbtc_input(std::move(trial));
-  if (trial.empty() && !coins.empty()) trial.push_back(0);
-
-  const auto estimate_inputs = build_inputs(trial);
-  const size_t vsize = wally_signer_->EstimateSignedVsize(
-      estimate_inputs, destinations, change_addr, kFeeHint,
-      wally::WallySigner::kP2WPKHWitnessWU, kSkipBalanceCheck);
-  fee_sats = wally::WallySigner::FeeSatsFromVsizeAndKvBRate(
-      vsize, static_cast<uint64_t>(fee_rate));
+  fee_sats = compute_relaxed_fee(select_non_lbtc(/*best_effort=*/true));
 }
 
 Amount NunchukWalletDb::EstimateFeeForLiquidTransaction(
