@@ -3398,27 +3398,29 @@ std::map<AssetId, Amount> NunchukImpl::GetAddressAssets(
 Transaction NunchukImpl::CreateLiquidTransaction(
     const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate, const std::string& memo) {
+    Amount fee_rate, const std::string& memo, bool subtract_fee_from_amount) {
   if (fee_rate <= 0) fee_rate = EstimateFee();
   return storage_->CreateLiquidTransaction(chain_, wallet_id, outputs, fee_rate,
-                                           memo);
+                                           memo, subtract_fee_from_amount);
 }
 
 Transaction NunchukImpl::DraftLiquidTransaction(
     const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate) {
+    Amount fee_rate, bool subtract_fee_from_amount) {
   if (fee_rate <= 0) fee_rate = EstimateFee();
-  return storage_->DraftLiquidTransaction(chain_, wallet_id, outputs, fee_rate);
+  return storage_->DraftLiquidTransaction(chain_, wallet_id, outputs, fee_rate,
+                                          subtract_fee_from_amount);
 }
 
 Amount NunchukImpl::EstimateFeeForLiquidTransaction(
     const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate) {
+    Amount fee_rate, bool subtract_fee_from_amount) {
   if (fee_rate <= 0) fee_rate = EstimateFee();
   return storage_->EstimateFeeForLiquidTransaction(chain_, wallet_id, outputs,
-                                                   fee_rate);
+                                                   fee_rate,
+                                                   subtract_fee_from_amount);
 }
 
 Transaction NunchukImpl::SignLiquidTransaction(const std::string& wallet_id,

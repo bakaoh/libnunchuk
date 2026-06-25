@@ -186,15 +186,16 @@ class NunchukStorage {
   Transaction CreateLiquidTransaction(
       Chain chain, const std::string &wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>> &outputs,
-      Amount fee_rate, const std::string &memo);
+      Amount fee_rate, const std::string &memo,
+      bool subtract_fee_from_amount = false);
   Transaction DraftLiquidTransaction(
       Chain chain, const std::string &wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>> &outputs,
-      Amount fee_rate);
+      Amount fee_rate, bool subtract_fee_from_amount = false);
   Amount EstimateFeeForLiquidTransaction(
       Chain chain, const std::string &wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>> &outputs,
-      Amount fee_rate);
+      Amount fee_rate, bool subtract_fee_from_amount = false);
   Transaction SignLiquidTransaction(Chain chain, const std::string &wallet_id,
                                     const std::string &tx_id);
   bool UpdatePsbt(Chain chain, const std::string &wallet_id,

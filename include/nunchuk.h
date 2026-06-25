@@ -2063,15 +2063,16 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual Transaction CreateLiquidTransaction(
       const std::string& wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-      Amount fee_rate = -1, const std::string& memo = {}) = 0;
+      Amount fee_rate = -1, const std::string& memo = {},
+      bool subtract_fee_from_amount = false) = 0;
   virtual Transaction DraftLiquidTransaction(
       const std::string& wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-      Amount fee_rate = -1) = 0;
+      Amount fee_rate = -1, bool subtract_fee_from_amount = false) = 0;
   virtual Amount EstimateFeeForLiquidTransaction(
       const std::string& wallet_id,
       const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-      Amount fee_rate = -1) = 0;
+      Amount fee_rate = -1, bool subtract_fee_from_amount = false) = 0;
   virtual Transaction SignLiquidTransaction(const std::string& wallet_id,
                                             const std::string& tx_id,
                                             const Device& device) = 0;

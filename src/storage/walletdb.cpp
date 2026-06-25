@@ -925,8 +925,8 @@ Transaction NunchukWalletDb::CreatePsbt(
 
 void NunchukWalletDb::PrepareLiquidTransaction(
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate, bool allow_insufficient_lbtc, std::string* unsigned_hex,
-    uint64_t& fee_sats) {
+    Amount fee_rate, bool allow_insufficient_lbtc, bool subtract_fee_from_amount,
+    std::string* unsigned_hex, uint64_t& fee_sats) {
   if (!IsSupportLiquid() || !wally_signer_) {
     throw NunchukException(NunchukException::INVALID_WALLET_TYPE,
                            "Wallet is not a Liquid wallet");
@@ -1200,6 +1200,73 @@ void NunchukWalletDb::PrepareLiquidTransaction(
     return {feeSats, std::move(final_inputs)};
   };
 
+  auto apply_subtract_fee_lbtc_dests =
+      [&](wally::WallySigner::AssetDestinations& dests, uint64_t gross_balance,
+          uint64_t fee_sats) {
+        if (fee_sats >= gross_balance) {
+          throw NunchukException(NunchukException::COIN_SELECTION_ERROR,
+                                 "Insufficient balance for an asset");
+        }
+        const uint64_t net = gross_balance - fee_sats;
+        auto& lbtc_dests = dests[LBTC];
+        uint64_t dest_sum = 0;
+        for (const auto& [addr, amt] : lbtc_dests) dest_sum += amt;
+        if (dest_sum == 0) {
+          throw NunchukException(NunchukException::INVALID_PARAMETER,
+                                 "LBTC destination amount must be > 0");
+        }
+        for (auto& [addr, amt] : lbtc_dests) {
+          amt = (amt * net) / dest_sum;
+        }
+        uint64_t new_sum = 0;
+        for (const auto& [addr, amt] : lbtc_dests) new_sum += amt;
+        if (new_sum < net) {
+          lbtc_dests.begin()->second += net - new_sum;
+        }
+      };
+
+  if (subtract_fee_from_amount && targets[LBTC] > 0) {
+    const Amount gross_balance = total_lbtc_balance();
+    if (gross_balance <= 0) {
+      throw NunchukException(NunchukException::COIN_SELECTION_ERROR,
+                             "No LBTC UTXOs available to pay fee");
+    }
+    auto lbtc_it = coins_by_asset.find(LBTC);
+    std::vector<size_t> selected = non_lbtc_selected;
+    selected.insert(selected.end(), lbtc_it->second.begin(),
+                    lbtc_it->second.end());
+    auto inputs = build_inputs(selected);
+
+    wally::WallySigner::AssetDestinations sweep_dests = destinations;
+    uint64_t feeSats = 1;
+    for (int iter = 0; iter < 20; ++iter) {
+      apply_subtract_fee_lbtc_dests(
+          sweep_dests, static_cast<uint64_t>(gross_balance), feeSats);
+      const size_t vsize = wally_signer_->EstimateSignedVsize(
+          inputs, sweep_dests, change_addr, feeSats);
+      const uint64_t refined =
+          wally::WallySigner::FeeSatsFromVsizeAndKvBRate(
+              vsize, static_cast<uint64_t>(fee_rate));
+      if (refined == feeSats) {
+        fee_sats = feeSats;
+        if (unsigned_hex != nullptr) {
+          *unsigned_hex = wally_signer_->CreateTx(inputs, sweep_dests,
+                                                  change_addr, feeSats);
+        }
+        return;
+      }
+      feeSats = refined;
+    }
+    fee_sats = feeSats;
+    if (unsigned_hex != nullptr) {
+      apply_subtract_fee_lbtc_dests(
+          sweep_dests, static_cast<uint64_t>(gross_balance), feeSats);
+      *unsigned_hex = wally_signer_->CreateTx(inputs, sweep_dests, change_addr,
+                                              feeSats);
+    }
+    return;
+  }
+
   if (!allow_insufficient_lbtc) {
     auto result = compute_fee_and_inputs(non_lbtc_selected, {});
     fee_sats = result.fee_sats;
@@ -1236,20 +1303,22 @@ void NunchukWalletDb::PrepareLiquidTransaction(
 
 Amount NunchukWalletDb::EstimateFeeForLiquidTransaction(
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate) {
+    Amount fee_rate, bool subtract_fee_from_amount) {
   uint64_t fee_sats = 0;
   PrepareLiquidTransaction(outputs, fee_rate, /*allow_insufficient_lbtc=*/true,
-                           /*unsigned_hex=*/nullptr, fee_sats);
+                           subtract_fee_from_amount, /*unsigned_hex=*/nullptr,
+                           fee_sats);
   return static_cast<Amount>(fee_sats);
 }
 
 Transaction NunchukWalletDb::CreateLiquidTransaction(
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate, const std::string& memo, bool persist) {
+    Amount fee_rate, const std::string& memo, bool persist,
+    bool subtract_fee_from_amount) {
   std::string unsigned_hex;
   uint64_t fee_sats = 0;
   PrepareLiquidTransaction(outputs, fee_rate, /*allow_insufficient_lbtc=*/false,
-                           &unsigned_hex, fee_sats);
+                           subtract_fee_from_amount, &unsigned_hex, fee_sats);
   const size_t signed_vsize =
       wally::WallySigner::ComputeSignedVsize(unsigned_hex);
 

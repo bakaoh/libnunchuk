@@ -1432,11 +1432,12 @@ Transaction NunchukStorage::CreatePsbt(
 Transaction NunchukStorage::CreateLiquidTransaction(
     Chain chain, const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate, const std::string& memo) {
+    Amount fee_rate, const std::string& memo, bool subtract_fee_from_amount) {
   std::unique_lock<std::shared_mutex> lock(access_);
   auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
   auto tx = db.CreateLiquidTransaction(outputs, fee_rate, memo,
-                                       /*persist=*/true);
+                                       /*persist=*/true,
+                                       subtract_fee_from_amount);
   db.FillSendReceiveData(tx);
   GetAppStateDb(chain).RemoveDeletedTransaction(tx.get_txid());
   return tx;
@@ -1445,11 +1446,12 @@ Transaction NunchukStorage::CreateLiquidTransaction(
 Transaction NunchukStorage::DraftLiquidTransaction(
     Chain chain, const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate) {
+    Amount fee_rate, bool subtract_fee_from_amount) {
   std::shared_lock<std::shared_mutex> lock(access_);
   auto db = GetLiquidSupportedWalletDb(chain, wallet_id);
   auto tx = db.CreateLiquidTransaction(outputs, fee_rate, /*memo=*/{},
-                                    /*persist=*/false);
+                                       /*persist=*/false,
+                                       subtract_fee_from_amount);
   db.FillSendReceiveData(tx);
   return tx;
 }
@@ -1457,10 +1459,11 @@ Transaction NunchukStorage::DraftLiquidTransaction(
 Amount NunchukStorage::EstimateFeeForLiquidTransaction(
     Chain chain, const std::string& wallet_id,
     const std::map<AssetId, std::map<std::string, Amount>>& outputs,
-    Amount fee_rate) {
+    Amount fee_rate, bool subtract_fee_from_amount) {
   std::shared_lock<std::shared_mutex> lock(access_);
   return GetLiquidSupportedWalletDb(chain, wallet_id)
-      .EstimateFeeForLiquidTransaction(outputs, fee_rate);
+      .EstimateFeeForLiquidTransaction(outputs, fee_rate,
+                                       subtract_fee_from_amount);
 }
 
 Transaction NunchukStorage::SignLiquidTransaction(Chain chain,
