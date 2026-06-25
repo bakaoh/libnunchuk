@@ -461,6 +461,34 @@ class WallySigner {
     return rs;
   }
 
+  // Synthetic LBTC UTXO for fee estimation (e.g. when LBTC cannot cover the fee).
+  LiquidUtxos MakeDummyLbtcUtxo(uint64_t value) const {
+    if (spk_.empty()) {
+      throw std::runtime_error("No wallet addresses available for dummy UTXO");
+    }
+    const auto& LBTC = WallyUtils::C().LBTC_ASSET_ID;
+    LiquidUtxos u;
+    u.tx_id = WallyUtils::RandomBytes(WALLY_TXHASH_LEN);
+    u.vouts_in = {0};
+    u.asset_ids_in.assign(LBTC.begin(), LBTC.end());
+    u.values_in = {std::max<uint64_t>(value, 1)};
+    u.abfs_in = WallyUtils::RandomBytes(32);
+    u.vbfs_in = WallyUtils::RandomBytes(32);
+    u.asset_generators_in.resize(ASSET_GENERATOR_LEN);
+    CHECK_WALLY(wally_asset_generator_from_bytes(
+        u.asset_ids_in.data(), u.asset_ids_in.size(), u.abfs_in.data(),
+        u.abfs_in.size(), u.asset_generators_in.data(),
+        u.asset_generators_in.size()));
+    u.script_pubkeys_in = {spk_.begin()->first};
+    u.value_commitments_in.resize(1);
+    u.value_commitments_in[0].resize(ASSET_COMMITMENT_LEN);
+    CHECK_WALLY(wally_asset_value_commitment(
+        u.values_in[0], u.vbfs_in.data(), u.vbfs_in.size(),
+        u.asset_generators_in.data(), u.asset_generators_in.size(),
+        u.value_commitments_in[0].data(), u.value_commitments_in[0].size()));
+    return u;
+  }
+
   LiquidUtxos GetUtxosFromTx(const std::string& txHex,
                              const std::string& address = {}) {
     LiquidUtxos out;
@@ -611,8 +639,7 @@ class WallySigner {
   //                     followed by a change output if leftover > 0.
   std::string CreateTx(const std::vector<LiquidUtxos>& inputs,
                        const AssetDestinations& destinations,
-                       const std::string& changeConfAddr, uint64_t feeSats,
-                       bool skip_balance_check = false) {
+                       const std::string& changeConfAddr, uint64_t feeSats) {
     if (inputs.empty()) throw std::runtime_error("inputs must be non-empty");
     if (destinations.empty())
       throw std::runtime_error("destinations must be non-empty");
@@ -716,21 +743,18 @@ class WallySigner {
     }
 
     if (!plans.contains(LBTC)) {
-      if (!skip_balance_check) {
-        throw std::runtime_error("No LBTC inputs available to pay fee");
-      }
-      plans.emplace(LBTC, AssetPlan{});
+      throw std::runtime_error("No LBTC inputs available to pay fee");
     }
     plans[LBTC].fee_part = feeSats;
 
     for (auto& [asset, p] : plans) {
       const uint64_t out_total = p.total_dest + p.fee_part;
-      if (!skip_balance_check && out_total > p.total_in) {
+      if (out_total > p.total_in) {
         throw std::runtime_error(
             "Insufficient inputs for an asset (destinations + fee exceed "
             "inputs)");
       }
-      p.change = p.total_in > out_total ? p.total_in - out_total : 0;
+      p.change = p.total_in - out_total;
       p.has_change = p.change > 0;
       if (p.has_change && changeConfAddr.empty()) {
         throw std::runtime_error(
@@ -739,9 +763,7 @@ class WallySigner {
       // Need at least one blinded output per asset to balance random input
       // vbfs; the explicit fee output is unblinded so it doesn't count.
       const bool has_blinded_out = !p.dests.empty() || p.has_change;
-      const bool has_inputs =
-          asset_input_idx.count(asset) && !asset_input_idx.at(asset).empty();
-      if (has_inputs && !has_blinded_out) {
+      if (!has_blinded_out) {
         throw std::runtime_error(
             "Asset has confidential inputs but no blinded outputs to balance "
             "(provide a destination or accept change for this asset)");
@@ -1328,10 +1350,9 @@ class WallySigner {
                              const AssetDestinations& destinations,
                              const std::string& changeConfAddr,
                              uint64_t feeSatsHint = 1,
-                             size_t witness_wu_per_input = kP2WPKHWitnessWU,
-                             bool skip_balance_check = false) {
-    const std::string placeholder_hex = CreateTx(
-        inputs, destinations, changeConfAddr, feeSatsHint, skip_balance_check);
+                             size_t witness_wu_per_input = kP2WPKHWitnessWU) {
+    const std::string placeholder_hex =
+        CreateTx(inputs, destinations, changeConfAddr, feeSatsHint);
     return ComputeSignedVsize(placeholder_hex, witness_wu_per_input);
   }
 
