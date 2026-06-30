@@ -619,7 +619,7 @@ std::map<AssetId, Amount> NunchukWalletDb::GetAddressAssets(
 
   std::set<std::pair<std::vector<unsigned char>, uint32_t>> spent_utxos;
   for (auto&& utxo : utxos) {
-    for (size_t i = 0; i < utxo.vouts_in.size(); i++) {
+    for (size_t i = 0; i < utxo.vins_tx_id.size(); i++) {
       spent_utxos.insert({utxo.vins_tx_id[i], utxo.vins_vout[i]});
     }
   }
