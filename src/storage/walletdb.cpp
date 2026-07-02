@@ -1560,12 +1560,8 @@ Transaction NunchukWalletDb::GetTransaction(const std::string& tx_id) {
     if (!extra.empty()) {
       FillExtra(extra, tx);
     }
-<<<<<<< HEAD
-    for (auto&& output : tx.get_outputs()) UseAddress(output.first);
-=======
     SQLCHECK(sqlite3_finalize(stmt));
     for (auto&& output : tx.get_outputs()) UseAddress(output.address);
->>>>>>> 8465f43 (Refactor TxOutput)
     auto new_memo = GetTransactionMemo(tx_id);
     if (new_memo) {
       tx.set_memo(new_memo.value());
