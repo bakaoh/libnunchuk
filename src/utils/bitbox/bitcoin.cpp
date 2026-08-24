@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <base58.h>
+#include <boost/algorithm/string/predicate.hpp>
 #include <cctype>
 #include <pubkey.h>
 #include <stdexcept>
@@ -102,14 +103,6 @@ proto::ScriptConfig::SimpleType SimpleType(AddressType address_type) {
   throw std::invalid_argument("BitBox address type is invalid");
 }
 
-bool EqualFingerprint(const std::string& lhs, const std::string& rhs) {
-  if (lhs.size() != rhs.size()) return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin(),
-                    [](unsigned char a, unsigned char b) {
-                      return std::tolower(a) == std::tolower(b);
-                    });
-}
-
 WalletAccount MakeWalletAccount(const SingleSigner& signer,
                                 std::optional<uint32_t> xpub_index) {
   const auto [external_index, internal_index] =
@@ -170,8 +163,9 @@ WalletConfig BuildWalletConfig(const Wallet& wallet,
   WalletConfig result;
   if (wallet.get_wallet_type() == WalletType::SINGLE_SIG) {
     if (wallet.get_signers().size() != 1 ||
-        !EqualFingerprint(wallet.get_signers()[0].get_master_fingerprint(),
-                          root_fingerprint)) {
+        !boost::algorithm::iequals(
+            wallet.get_signers()[0].get_master_fingerprint(),
+            root_fingerprint)) {
       throw std::invalid_argument("BitBox single-sig wallet does not use this device");
     }
     result.script_config.kind = proto::ScriptConfig::Kind::SIMPLE;
@@ -199,7 +193,8 @@ WalletConfig BuildWalletConfig(const Wallet& wallet,
     }
     for (size_t index = 0; index < wallet.get_signers().size(); ++index) {
       const auto& signer = wallet.get_signers()[index];
-      if (EqualFingerprint(signer.get_master_fingerprint(), root_fingerprint)) {
+      if (boost::algorithm::iequals(signer.get_master_fingerprint(),
+                                    root_fingerprint)) {
         result.accounts.push_back(MakeWalletAccount(
             signer, static_cast<uint32_t>(index)));
       }
@@ -232,8 +227,8 @@ WalletConfig BuildWalletConfig(const Wallet& wallet,
         }
         key.keypath = ParseKeypath(signer->get_derivation_path());
         key.xpub = ConvertXpub(signer->get_xpub());
-        if (EqualFingerprint(signer->get_master_fingerprint(),
-                             root_fingerprint)) {
+        if (boost::algorithm::iequals(signer->get_master_fingerprint(),
+                                      root_fingerprint)) {
           const auto duplicate = std::find_if(
               result.accounts.begin(), result.accounts.end(),
               [&](const WalletAccount& account) {

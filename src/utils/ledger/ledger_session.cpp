@@ -17,6 +17,7 @@
 
 #include "utils/ledger/ledger_session.hpp"
 
+#include <algorithm>
 #include <mutex>
 #include <stdexcept>
 #include <string_view>
@@ -152,6 +153,16 @@ struct PreparedWalletPolicy {
 PreparedWalletPolicy PrepareWalletPolicyContext(
     LedgerContinuationContext& context, const Bip388Policy& policy,
     const std::string& wallet_name) {
+  if (wallet_name.empty() || wallet_name.size() > 64 ||
+      wallet_name.front() == ' ' || wallet_name.back() == ' ' ||
+      !std::all_of(wallet_name.begin(), wallet_name.end(),
+                   [](unsigned char value) {
+                     return value >= 0x20 && value <= 0x7e;
+                   })) {
+    throw std::invalid_argument(
+        "Ledger wallet name must contain 1-64 printable ASCII characters "
+        "without leading or trailing spaces");
+  }
   if (policy.keys_info.empty()) {
     throw std::invalid_argument("Wallet policy must contain key info");
   }
