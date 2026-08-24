@@ -1,8 +1,9 @@
 # BitBox protobuf messages
 
-The top-level `.proto` files are unmodified copies from
+The top-level `.proto` files are based on
 [`bitbox02-api-go`](https://github.com/BitBoxSwiss/bitbox02-api-go) commit
-`a62f9fddb79d00ae85083be06609280e35138b19`. The bundled
+`a62f9fddb79d00ae85083be06609280e35138b19`, with `btc.proto` synchronized
+with BitBox firmware v9.27.0. The bundled
 `google/protobuf/empty.proto` comes from protoc 3.21.12.
 
 The checked-in `.pb.c` and `.pb.h` files were generated with protoc 3.21.12

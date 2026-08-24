@@ -148,7 +148,8 @@ typedef struct _shiftcrypto_bitbox02_BTCSignInitRequest {
     uint32_t version; /* must be 1 or 2 */
     uint32_t num_inputs;
     uint32_t num_outputs;
-    uint32_t locktime; /* must be <500000000 */
+    /* Consensus nLockTime: values below 500000000 are block heights, otherwise Unix timestamps. */
+    uint32_t locktime;
     shiftcrypto_bitbox02_BTCSignInitRequest_FormatUnit format_unit;
     bool contains_silent_payment_outputs;
     /* used script configs for outputs that send to an address of the same keystore, but not

@@ -55,17 +55,21 @@ struct FirmwareRelease {
 // Keep this metadata in sync with BitBoxApp's bundledFirmwares table in
 // backend/devices/bitbox02bootloader/firmware.go. Firmware binaries remain
 // client-supplied; only the required upgrade order is mirrored here.
-constexpr std::array<FirmwareRelease, 10> FIRMWARE_RELEASES{{
+constexpr std::array<FirmwareRelease, 14> FIRMWARE_RELEASES{{
     {BitBoxProduct::BITBOX02_MULTI, 9, 17, 1, 36},
     {BitBoxProduct::BITBOX02_MULTI, 9, 26, 2, 50},
     {BitBoxProduct::BITBOX02_MULTI, 9, 26, 4, 52},
+    {BitBoxProduct::BITBOX02_MULTI, 9, 27, 0, 54},
     {BitBoxProduct::BITBOX02_BITCOIN_ONLY, 9, 17, 1, 36},
     {BitBoxProduct::BITBOX02_BITCOIN_ONLY, 9, 26, 2, 50},
     {BitBoxProduct::BITBOX02_BITCOIN_ONLY, 9, 26, 3, 51},
+    {BitBoxProduct::BITBOX02_BITCOIN_ONLY, 9, 27, 0, 54},
     {BitBoxProduct::NOVA_MULTI, 9, 26, 2, 50},
     {BitBoxProduct::NOVA_MULTI, 9, 26, 4, 52},
+    {BitBoxProduct::NOVA_MULTI, 9, 27, 0, 54},
     {BitBoxProduct::NOVA_BITCOIN_ONLY, 9, 26, 2, 50},
     {BitBoxProduct::NOVA_BITCOIN_ONLY, 9, 26, 3, 51},
+    {BitBoxProduct::NOVA_BITCOIN_ONLY, 9, 27, 0, 54},
 }};
 
 const FirmwareRelease* NextFirmwareRelease(
@@ -1668,6 +1672,14 @@ BitBoxStep BitBoxSession::signMessage(const std::string& derivation_path,
     command_ = Command::SIGN_MESSAGE;
     command_context_ = MessageSigningContext{};
     const auto config = BuildMessageConfig(derivation_path);
+    constexpr uint32_t hardened = uint32_t{1} << 31;
+    if (config.keypath.front() == hardened + 45 &&
+        !FirmwareAtLeast(device_info_.firmware_version, 9, 27, 0)) {
+      return fail(BitBoxErrorCode::UNSUPPORTED_FIRMWARE,
+                  "BitBox BIP45 message signing requires firmware 9.27.0 or "
+                  "newer; device has " +
+                      device_info_.firmware_version);
+    }
     if (!FirmwareAtLeast(device_info_.firmware_version, 9, 2, 0)) {
       return fail(BitBoxErrorCode::UNSUPPORTED_FIRMWARE,
                   "BitBox message signing requires firmware 9.2.0 or newer; "

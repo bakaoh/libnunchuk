@@ -63,22 +63,25 @@ std::optional<BitBoxEndpoint> IdentifyBitBoxEndpoint(
 
 std::string GetBitBoxSignMessagePath(const SingleSigner& signer) {
   auto keypath = ParseKeypath(signer.get_derivation_path());
+  constexpr uint32_t hardened = uint32_t{1} << 31;
   const auto bip32_type = GetBip32Type(WriteHDKeypath(keypath));
-  if (bip32_type != "bip49" && bip32_type != "bip84") {
+  if (bip32_type != "bip45" && bip32_type != "bip49" &&
+      bip32_type != "bip84") {
     throw std::invalid_argument(
-        "BitBox message signing supports BIP49 and BIP84 paths only");
+        "BitBox message signing supports BIP45, BIP49, and BIP84 paths only");
   }
   if (keypath.size() != 3) {
     throw std::invalid_argument(
         "BitBox message signing requires an account path");
   }
 
-  constexpr uint32_t hardened = uint32_t{1} << 31;
-  if (keypath[1] != hardened && keypath[1] != hardened + 1) {
+  if (bip32_type != "bip45" && keypath[1] != hardened &&
+      keypath[1] != hardened + 1) {
     throw std::invalid_argument(
         "BitBox message signing supports Bitcoin paths only");
   }
-  if (keypath[2] < hardened || keypath[2] > hardened + 99) {
+  if (bip32_type != "bip45" &&
+      (keypath[2] < hardened || keypath[2] > hardened + 99)) {
     throw std::invalid_argument(
         "BitBox message signing account must be between 0h and 99h");
   }

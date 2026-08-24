@@ -281,9 +281,11 @@ proto::ScriptConfigWithKeypath BuildMessageConfig(
         proto::ScriptConfig::SimpleType::P2WPKH_P2SH;
   } else if (bip32_type == "bip84") {
     result.script_config.simple_type = proto::ScriptConfig::SimpleType::P2WPKH;
+  } else if (bip32_type == "bip45" && result.keypath.size() <= 10) {
+    result.script_config.simple_type = proto::ScriptConfig::SimpleType::P2WPKH;
   } else {
     throw std::invalid_argument(
-        "BitBox message signing supports BIP49 and BIP84 paths only");
+        "BitBox message signing supports BIP45, BIP49, and BIP84 paths only");
   }
   return result;
 }
