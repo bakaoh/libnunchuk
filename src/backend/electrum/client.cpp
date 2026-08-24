@@ -119,18 +119,25 @@ ElectrumClient::ElectrumClient(const AppSettings& appsettings,
   is_secure_ = boost::iequals(protocol_, "ssl");
   if (is_secure_) {
     ssl::context ctx(ssl::context::tls);
-    // Always verify the peer. Use a caller-supplied CA/pin file when set;
-    // otherwise load the embedded Mozilla CA bundle (same as GroupService).
-    // Unpinned: certs that do not chain to Mozilla (private CA, self-signed)
-    // are accepted without CA/CN/SAN checks. CA-signed peers still get a
-    // hostname check.
-    ctx.set_verify_mode(ssl::verify_peer);
-    if (!appsettings.get_certificate_file().empty()) {
-      ctx.load_verify_file(appsettings.get_certificate_file());
+    // .onion: still do a TLS handshake (ssl://), but skip cert verification.
+    // Tor already authenticates the hidden service; StartOS/private CA
+    // names never match the onion address.
+    if (IsOnionHost(host_)) {
+      ctx.set_verify_mode(ssl::verify_none);
     } else {
-      ssl_allow_self_signed_ = true;
-      // SSL_CTX_set_cert_store takes ownership of the X509_STORE.
-      SSL_CTX_set_cert_store(ctx.native_handle(), CreateEmbeddedCaCertStore());
+      // Always verify the peer. Use a caller-supplied CA/pin file when set;
+      // otherwise load the embedded Mozilla CA bundle (same as GroupService).
+      // Unpinned: certs that do not chain to Mozilla (private CA, self-signed)
+      // are accepted without CA/CN/SAN checks. CA-signed peers still get a
+      // hostname check.
+      ctx.set_verify_mode(ssl::verify_peer);
+      if (!appsettings.get_certificate_file().empty()) {
+        ctx.load_verify_file(appsettings.get_certificate_file());
+      } else {
+        ssl_allow_self_signed_ = true;
+        // SSL_CTX_set_cert_store takes ownership of the X509_STORE.
+        SSL_CTX_set_cert_store(ctx.native_handle(), CreateEmbeddedCaCertStore());
+      }
     }
     secure_socket_ = std::unique_ptr<ssl::stream<ip::tcp::socket>>(
         new ssl::stream<ip::tcp::socket>(io_service_, ctx));
@@ -592,9 +599,6 @@ void ElectrumClient::handle_connect(const boost::system::error_code& error) {
     boost::asio::ip::make_address(host_, addr_err);
     const bool host_is_ip = !addr_err;
     const bool host_is_onion = IsOnionHost(host_);
-    // .onion: Tor already authenticates the hidden service. StartOS/private
-    // CA certs use a LAN/.local SAN, so SNI=onion can make the terminator
-    // reject the handshake (unrecognized_name) or fail hostname checks.
     if (!host_is_ip && !host_is_onion) {
       if (SSL_set_tlsext_host_name(ssl, host_.c_str()) != 1) {
         return handle_error("handle_connect", "Failed to set TLS SNI hostname");
@@ -615,46 +619,42 @@ void ElectrumClient::handle_connect(const boost::system::error_code& error) {
                             "Failed to set TLS verification IP address");
       }
     }
-    secure_socket_->set_verify_callback(
-        [allow_untrusted = ssl_allow_self_signed_, host = host_, host_is_ip,
-         host_is_onion](bool preverified, ssl::verify_context& ctx) {
-          X509_STORE_CTX* store_ctx = ctx.native_handle();
-          X509* cert = X509_STORE_CTX_get_current_cert(store_ctx);
-          const int depth = X509_STORE_CTX_get_error_depth(store_ctx);
-          const bool self_signed_leaf =
-              depth == 0 && IsSelfSignedCert(cert);
+    if (!host_is_onion) {
+      secure_socket_->set_verify_callback(
+          [allow_untrusted = ssl_allow_self_signed_, host = host_, host_is_ip](
+              bool preverified, ssl::verify_context& ctx) {
+            X509_STORE_CTX* store_ctx = ctx.native_handle();
+            X509* cert = X509_STORE_CTX_get_current_cert(store_ctx);
+            const int depth = X509_STORE_CTX_get_error_depth(store_ctx);
+            const bool self_signed_leaf =
+                depth == 0 && IsSelfSignedCert(cert);
 
-          // Unpinned: accept anything not chained to Mozilla (private CA,
-          // self-signed, incomplete chain). Hostname is not enforced here.
-          if (allow_untrusted && !preverified) {
-            char subject_name[256] = {};
-            if (cert != nullptr) {
-              X509_NAME_oneline(X509_get_subject_name(cert), subject_name,
-                                sizeof(subject_name));
+            // Unpinned: accept anything not chained to Mozilla (private CA,
+            // self-signed, incomplete chain). Hostname is not enforced here.
+            if (allow_untrusted && !preverified) {
+              char subject_name[256] = {};
+              if (cert != nullptr) {
+                X509_NAME_oneline(X509_get_subject_name(cert), subject_name,
+                                  sizeof(subject_name));
+              }
+              LOG_F(WARNING,
+                    "Accepting TLS certificate not trusted by Mozilla CA "
+                    "(err=%d depth=%d): %s",
+                    X509_STORE_CTX_get_error(store_ctx), depth, subject_name);
+              return true;
             }
-            LOG_F(WARNING,
-                  "Accepting TLS certificate not trusted by Mozilla CA "
-                  "(err=%d depth=%d): %s",
-                  X509_STORE_CTX_get_error(store_ctx), depth, subject_name);
-            return true;
-          }
-          // Pinned self-signed that chained to the pin: skip CN/SAN only.
-          if (self_signed_leaf && preverified) {
-            return true;
-          }
-          // .onion identity is the Tor address, not the cert SAN (often
-          // .local / LAN). Skip hostname checks; still require the pin
-          // when a certificate file is set.
-          if (host_is_onion) {
-            return preverified || allow_untrusted;
-          }
-          // Unpinned ssl://ip:port: Electrum certs usually have a DNS SAN
-          // only, so skip IP identity checks.
-          if (allow_untrusted && host_is_ip) {
-            return preverified;
-          }
-          return ssl::host_name_verification(host)(preverified, ctx);
-        });
+            // Pinned self-signed that chained to the pin: skip CN/SAN only.
+            if (self_signed_leaf && preverified) {
+              return true;
+            }
+            // Unpinned ssl://ip:port: Electrum certs usually have a DNS SAN
+            // only, so skip IP identity checks.
+            if (allow_untrusted && host_is_ip) {
+              return preverified;
+            }
+            return ssl::host_name_verification(host)(preverified, ctx);
+          });
+    }
     boost::system::error_code handshake_ec;
     secure_socket_->handshake(ssl::stream_base::client, handshake_ec);
     if (handshake_ec) {
