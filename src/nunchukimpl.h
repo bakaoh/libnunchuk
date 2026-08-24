@@ -251,6 +251,8 @@ class NunchukImpl : public Nunchuk {
                           const std::string& tx_id) override;
   Transaction BroadcastTransaction(const std::string& wallet_id,
                                    const std::string& tx_id) override;
+  std::string BroadcastRawTransaction(const std::string& txhex,
+                                      bool liquid = false) override;
   Transaction GetTransaction(const std::string& wallet_id,
                              const std::string& tx_id) override;
   std::string GetRawTransaction(const std::string& wallet_id,

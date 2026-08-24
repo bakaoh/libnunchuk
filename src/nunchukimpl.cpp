@@ -69,9 +69,8 @@ namespace {
 bool IsLedgerWalletHmac(const std::string& hmac) {
   return hmac.empty() ||
          (hmac.size() == 64 &&
-          std::all_of(hmac.begin(), hmac.end(), [](unsigned char c) {
-            return std::isxdigit(c);
-          }));
+          std::all_of(hmac.begin(), hmac.end(),
+                      [](unsigned char c) { return std::isxdigit(c); }));
 }
 
 }  // namespace
@@ -655,9 +654,7 @@ MasterSigner NunchukImpl::CreateMasterSigner(
 
   storage_->CacheMasterSignerXPub(
       chain_, id,
-      [&](std::string path) {
-        return hwi_.GetXpubAtPath(signer_device, path);
-      },
+      [&](std::string path) { return hwi_.GetXpubAtPath(signer_device, path); },
       progress, true);
   storage_listener_();
 
@@ -904,8 +901,7 @@ int NunchukImpl::GetLastUsedSignerIndex(const std::string& xfp,
 }
 
 static SingleSigner DeriveSigner(const SingleSigner& signer,
-                                 const std::string& path,
-                                 std::string suffix) {
+                                 const std::string& path, std::string suffix) {
   std::replace(suffix.begin(), suffix.end(), 'h', '\'');
   std::vector<uint32_t> keypath;
   if (!ParseHDKeypath("m" + suffix, keypath)) {
@@ -948,8 +944,7 @@ SingleSigner NunchukImpl::GetSignerFromMasterSigner(
           auto signer = GetSignerFromMasterSigner(mastersigner_id, signer_path);
           return DeriveSigner(signer, path, suffix);
         } catch (NunchukException& signer_error) {
-          if (signer_error.code() !=
-              NunchukException::RUN_OUT_OF_CACHED_XPUB) {
+          if (signer_error.code() != NunchukException::RUN_OUT_OF_CACHED_XPUB) {
             throw;
           }
         }
@@ -1676,6 +1671,16 @@ Transaction NunchukImpl::BroadcastTransaction(const std::string& wallet_id,
     }
   }
   return UpdateTransaction(wallet_id, tx_id, new_txid, raw_tx, reject_msg);
+}
+
+std::string NunchukImpl::BroadcastRawTransaction(const std::string& txhex,
+                                                 bool liquid) {
+  if (liquid) {
+    SyncForLiquid(true)->BroadcastLiquidTransaction(txhex);
+    return wally::WallyUtils::GetTxid(txhex);
+  }
+  synchronizer_->Broadcast(txhex);
+  return DecodeRawTransaction(txhex).GetHash().GetHex();
 }
 
 Transaction NunchukImpl::UpdateTransaction(const std::string& wallet_id,

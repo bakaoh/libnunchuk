@@ -1668,6 +1668,8 @@ class NUNCHUK_EXPORT Nunchuk {
                                  bool send_group_event = true) = 0;
   virtual Transaction BroadcastTransaction(const std::string& wallet_id,
                                            const std::string& tx_id) = 0;
+  virtual std::string BroadcastRawTransaction(const std::string& txhex,
+                                              bool liquid = false) = 0;
   virtual Transaction GetTransaction(const std::string& wallet_id,
                                      const std::string& tx_id) = 0;
   virtual std::string GetRawTransaction(const std::string& wallet_id,
