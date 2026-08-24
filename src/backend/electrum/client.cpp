@@ -59,6 +59,10 @@ static bool IsSelfSignedCert(X509* cert) {
                                           X509_get_issuer_name(cert)) == 0;
 }
 
+static bool IsOnionHost(const std::string& host) {
+  return boost::iends_with(host, ".onion");
+}
+
 static NunchukException MakeElectrumException(const std::string& error) {
   if (!boost::istarts_with(error, NETWORK_REJECTED_PREFIX)) {
     return NunchukException(NunchukException::SERVER_REQUEST_ERROR,
@@ -587,7 +591,11 @@ void ElectrumClient::handle_connect(const boost::system::error_code& error) {
     boost::system::error_code addr_err;
     boost::asio::ip::make_address(host_, addr_err);
     const bool host_is_ip = !addr_err;
-    if (!host_is_ip) {
+    const bool host_is_onion = IsOnionHost(host_);
+    // .onion: Tor already authenticates the hidden service. StartOS/private
+    // CA certs use a LAN/.local SAN, so SNI=onion can make the terminator
+    // reject the handshake (unrecognized_name) or fail hostname checks.
+    if (!host_is_ip && !host_is_onion) {
       if (SSL_set_tlsext_host_name(ssl, host_.c_str()) != 1) {
         return handle_error("handle_connect", "Failed to set TLS SNI hostname");
       }
@@ -598,7 +606,7 @@ void ElectrumClient::handle_connect(const boost::system::error_code& error) {
         return handle_error("handle_connect",
                             "Failed to set TLS verification hostname");
       }
-    } else if (!ssl_allow_self_signed_) {
+    } else if (!ssl_allow_self_signed_ && host_is_ip) {
       // Pinned cert: require the certificate IP SAN to match host_.
       X509_VERIFY_PARAM* param = SSL_get0_param(ssl);
       if (param == nullptr ||
@@ -608,8 +616,8 @@ void ElectrumClient::handle_connect(const boost::system::error_code& error) {
       }
     }
     secure_socket_->set_verify_callback(
-        [allow_untrusted = ssl_allow_self_signed_, host = host_, host_is_ip](
-            bool preverified, ssl::verify_context& ctx) {
+        [allow_untrusted = ssl_allow_self_signed_, host = host_, host_is_ip,
+         host_is_onion](bool preverified, ssl::verify_context& ctx) {
           X509_STORE_CTX* store_ctx = ctx.native_handle();
           X509* cert = X509_STORE_CTX_get_current_cert(store_ctx);
           const int depth = X509_STORE_CTX_get_error_depth(store_ctx);
@@ -633,6 +641,12 @@ void ElectrumClient::handle_connect(const boost::system::error_code& error) {
           // Pinned self-signed that chained to the pin: skip CN/SAN only.
           if (self_signed_leaf && preverified) {
             return true;
+          }
+          // .onion identity is the Tor address, not the cert SAN (often
+          // .local / LAN). Skip hostname checks; still require the pin
+          // when a certificate file is set.
+          if (host_is_onion) {
+            return preverified || allow_untrusted;
           }
           // Unpinned ssl://ip:port: Electrum certs usually have a DNS SAN
           // only, so skip IP identity checks.
