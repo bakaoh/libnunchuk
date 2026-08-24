@@ -1577,6 +1577,12 @@ Transaction NunchukImpl::BroadcastTransaction(const std::string& wallet_id,
   return UpdateTransaction(wallet_id, tx_id, new_txid, raw_tx, reject_msg);
 }
 
+std::string NunchukImpl::BroadcastRawTransaction(const std::string& txhex) {
+  std::string tx_id = DecodeRawTransaction(txhex).GetHash().GetHex();
+  synchronizer_->Broadcast(txhex);
+  return tx_id;
+}
+
 Transaction NunchukImpl::UpdateTransaction(const std::string& wallet_id,
                                            const std::string& tx_id,
                                            const std::string& new_txid,
