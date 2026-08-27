@@ -892,18 +892,16 @@ BitBoxStep BitBoxSession::handleCommandResponse(
         return fail(BitBoxErrorCode::INVALID_RESPONSE,
                     "BitBox returned an invalid message recovery ID");
       }
-      if (FirmwareAtLeast(device_info_.firmware_version, 9, 5, 0)) {
-        if (!context->anti_klepto.has_value()) {
-          return fail(BitBoxErrorCode::INVALID_STATE,
-                      "BitBox message anti-klepto context is missing");
-        }
-        const auto& anti_klepto = *context->anti_klepto;
-        std::string error;
-        if (!VerifyAntiKlepto(anti_klepto.host_nonce,
-                              anti_klepto.signer_commitment,
-                              std::span(signature).first(64), error)) {
-          return fail(BitBoxErrorCode::ANTI_KLEPTO, error);
-        }
+      if (!context->anti_klepto.has_value()) {
+        return fail(BitBoxErrorCode::INVALID_STATE,
+                    "BitBox message anti-klepto context is missing");
+      }
+      const auto& anti_klepto = *context->anti_klepto;
+      std::string error;
+      if (!VerifyAntiKlepto(anti_klepto.host_nonce,
+                            anti_klepto.signer_commitment,
+                            std::span(signature).first(64), error)) {
+        return fail(BitBoxErrorCode::ANTI_KLEPTO, error);
       }
       std::vector<unsigned char> electrum_signature;
       electrum_signature.reserve(65);
@@ -980,8 +978,7 @@ BitBoxStep BitBoxSession::handleCommandResponse(
           const bool anti_klepto =
               context->second_pass &&
               prepared_psbt.keys.at(next.index).type ==
-                  PsbtInputKey::Type::ECDSA &&
-              FirmwareAtLeast(device_info_.firmware_version, 9, 4, 0);
+                  PsbtInputKey::Type::ECDSA;
           if (anti_klepto) {
             auto& anti_klepto_context = context->anti_klepto.emplace();
             GetStrongRandBytes(anti_klepto_context.host_nonce);
@@ -1673,16 +1670,24 @@ BitBoxStep BitBoxSession::signMessage(const std::string& derivation_path,
     command_context_ = MessageSigningContext{};
     const auto config = BuildMessageConfig(derivation_path);
     constexpr uint32_t hardened = uint32_t{1} << 31;
-    if (config.keypath.front() == hardened + 45 &&
+    const auto purpose = config.keypath.front();
+    if (purpose == hardened + 45 &&
         !FirmwareAtLeast(device_info_.firmware_version, 9, 27, 0)) {
       return fail(BitBoxErrorCode::UNSUPPORTED_FIRMWARE,
                   "BitBox BIP45 message signing requires firmware 9.27.0 or "
                   "newer; device has " +
                       device_info_.firmware_version);
     }
-    if (!FirmwareAtLeast(device_info_.firmware_version, 9, 2, 0)) {
+    if (purpose == hardened + 48 &&
+        !FirmwareAtLeast(device_info_.firmware_version, 9, 27, 1)) {
       return fail(BitBoxErrorCode::UNSUPPORTED_FIRMWARE,
-                  "BitBox message signing requires firmware 9.2.0 or newer; "
+                  "BitBox BIP48 message signing requires firmware 9.27.1 or "
+                  "newer; device has " +
+                      device_info_.firmware_version);
+    }
+    if (!FirmwareAtLeast(device_info_.firmware_version, 9, 5, 0)) {
+      return fail(BitBoxErrorCode::UNSUPPORTED_FIRMWARE,
+                  "BitBox message signing requires firmware 9.5.0 or newer; "
                   "device has " +
                       device_info_.firmware_version);
     }
@@ -1693,17 +1698,12 @@ BitBoxStep BitBoxSession::signMessage(const std::string& derivation_path,
                   "9.23.0 or newer; device has " +
                       device_info_.firmware_version);
     }
-    std::vector<unsigned char> commitment;
-    auto phase = Phase::MESSAGE_SIGNATURE;
-    if (FirmwareAtLeast(device_info_.firmware_version, 9, 5, 0)) {
-      auto& anti_klepto =
-          std::get<MessageSigningContext>(command_context_)
-              .anti_klepto.emplace();
-      GetStrongRandBytes(anti_klepto.host_nonce);
-      const auto hash = AntiKleptoHostCommitment(anti_klepto.host_nonce);
-      commitment.assign(hash.begin(), hash.end());
-      phase = Phase::MESSAGE_COMMITMENT;
-    }
+    auto& anti_klepto =
+        std::get<MessageSigningContext>(command_context_)
+            .anti_klepto.emplace();
+    GetStrongRandBytes(anti_klepto.host_nonce);
+    const auto hash = AntiKleptoHostCommitment(anti_klepto.host_nonce);
+    const std::vector<unsigned char> commitment(hash.begin(), hash.end());
     return sendEncrypted(
         proto::EncodeSignMessageRequest(
             CoinForChain(chain_), config,
@@ -1711,7 +1711,7 @@ BitBoxStep BitBoxSession::signMessage(const std::string& derivation_path,
                 reinterpret_cast<const unsigned char*>(message.data()),
                 message.size()),
             commitment),
-        phase, UserInteraction::SIGN_MESSAGE);
+        Phase::MESSAGE_COMMITMENT, UserInteraction::SIGN_MESSAGE);
   } catch (const std::exception& e) {
     return fail(BitBoxErrorCode::INVALID_ARGUMENT, e.what());
   }
@@ -1723,6 +1723,12 @@ BitBoxStep BitBoxSession::signPsbt(const Wallet& wallet,
   try {
     if (auto error = requireReady()) return *error;
     if (auto error = requireDeviceInitialized()) return *error;
+    if (!FirmwareAtLeast(device_info_.firmware_version, 9, 4, 0)) {
+      return fail(BitBoxErrorCode::UNSUPPORTED_FIRMWARE,
+                  "BitBox transaction signing requires firmware 9.4.0 or "
+                  "newer; device has " +
+                      device_info_.firmware_version);
+    }
     result_.reset();
     command_ = Command::SIGN_PSBT;
     command_context_ = PsbtSigningContext{wallet, psbt};

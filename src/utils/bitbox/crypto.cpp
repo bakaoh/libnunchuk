@@ -215,6 +215,21 @@ bool VerifyAntiKlepto(std::span<const unsigned char> host_nonce,
     error = "BitBox anti-klepto verifier initialization failed";
     return false;
   }
+  if (secp256k1_ec_seckey_verify(context, compact_signature.data()) != 1 ||
+      secp256k1_ec_seckey_verify(context,
+                                 compact_signature.data() + HASH_SIZE) != 1) {
+    error = "BitBox anti-klepto signature scalar is invalid";
+    return false;
+  }
+  secp256k1_ecdsa_signature parsed_signature;
+  secp256k1_ecdsa_signature normalized_signature;
+  if (secp256k1_ecdsa_signature_parse_compact(
+          context, &parsed_signature, compact_signature.data()) != 1 ||
+      secp256k1_ecdsa_signature_normalize(
+          context, &normalized_signature, &parsed_signature) != 0) {
+    error = "BitBox anti-klepto signature is not low-S";
+    return false;
+  }
   secp256k1_pubkey commitment;
   if (secp256k1_ec_pubkey_parse(context, &commitment,
                                 signer_commitment.data(),

@@ -276,16 +276,19 @@ proto::ScriptConfigWithKeypath BuildMessageConfig(
   }
   result.script_config.kind = proto::ScriptConfig::Kind::SIMPLE;
   const auto bip32_type = GetBip32Type(WriteHDKeypath(result.keypath));
+  constexpr uint32_t hardened = uint32_t{1} << 31;
+  const auto purpose = result.keypath.front();
   if (bip32_type == "bip49") {
     result.script_config.simple_type =
         proto::ScriptConfig::SimpleType::P2WPKH_P2SH;
   } else if (bip32_type == "bip84") {
     result.script_config.simple_type = proto::ScriptConfig::SimpleType::P2WPKH;
-  } else if (bip32_type == "bip45" && result.keypath.size() <= 10) {
+  } else if (purpose == hardened + 45 || purpose == hardened + 48) {
     result.script_config.simple_type = proto::ScriptConfig::SimpleType::P2WPKH;
   } else {
     throw std::invalid_argument(
-        "BitBox message signing supports BIP45, BIP49, and BIP84 paths only");
+        "BitBox message signing supports BIP45, BIP48, BIP49, and BIP84 "
+        "paths only");
   }
   return result;
 }

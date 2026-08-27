@@ -17,6 +17,7 @@
 
 #include "utils/bitbox/bitbox.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <key_io.h>
@@ -65,43 +66,30 @@ std::string GetBitBoxSignMessagePath(const SingleSigner& signer) {
   auto keypath = ParseKeypath(signer.get_derivation_path());
   constexpr uint32_t hardened = uint32_t{1} << 31;
   const auto bip32_type = GetBip32Type(WriteHDKeypath(keypath));
-  if (bip32_type != "bip45" && bip32_type != "bip49" &&
-      bip32_type != "bip84") {
-    throw std::invalid_argument(
-        "BitBox message signing supports BIP45, BIP49, and BIP84 paths only");
+  if ((bip32_type == "bip49" || bip32_type == "bip84") &&
+      std::all_of(keypath.begin(), keypath.end(),
+                  [hardened](uint32_t child) {
+                    return child >= hardened;
+                  })) {
+    keypath.push_back(0);
+    keypath.push_back(0);
   }
-  if (keypath.size() != 3) {
-    throw std::invalid_argument(
-        "BitBox message signing requires an account path");
-  }
-
-  if (bip32_type != "bip45" && keypath[1] != hardened &&
-      keypath[1] != hardened + 1) {
-    throw std::invalid_argument(
-        "BitBox message signing supports Bitcoin paths only");
-  }
-  if (bip32_type != "bip45" &&
-      (keypath[2] < hardened || keypath[2] > hardened + 99)) {
-    throw std::invalid_argument(
-        "BitBox message signing account must be between 0h and 99h");
-  }
-
-  keypath.push_back(0);
-  keypath.push_back(0);
   return WriteHDKeypath(keypath);
 }
 
 std::string GetBitBoxSignMessageAddress(const SingleSigner& signer) {
   const auto keypath = ParseKeypath(GetBitBoxSignMessagePath(signer));
+  const auto account_keypath = ParseKeypath(signer.get_derivation_path());
 
   auto xpub = DecodeExtPubKey(signer.get_xpub());
   if (!xpub.pubkey.IsFullyValid()) {
     throw std::invalid_argument("BitBox signer xpub is invalid");
   }
-  if (!xpub.Derive(xpub, keypath[3]) ||
-      !xpub.Derive(xpub, keypath[4])) {
-    throw std::invalid_argument(
-        "Could not derive the BitBox message-signing address");
+  for (size_t index = account_keypath.size(); index < keypath.size(); ++index) {
+    if (!xpub.Derive(xpub, keypath[index])) {
+      throw std::invalid_argument(
+          "Could not derive the BitBox message-signing address");
+    }
   }
   return EncodeDestination(PKHash(xpub.pubkey.GetID()));
 }
