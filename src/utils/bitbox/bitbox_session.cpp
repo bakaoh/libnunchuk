@@ -1552,7 +1552,8 @@ BitBoxStep BitBoxSession::startPsbtPass(
       proto::EncodeSignInitRequest(
           CoinForChain(chain_), prepared_psbt.script_configs,
           prepared_psbt.psbt.tx->version, prepared_psbt.inputs.size(),
-          prepared_psbt.outputs.size(), prepared_psbt.psbt.tx->nLockTime),
+          prepared_psbt.outputs.size(), prepared_psbt.psbt.tx->nLockTime,
+          prepared_psbt.output_script_configs),
       Phase::PSBT_RESPONSE, UserInteraction::SIGN_TRANSACTION);
 }
 

@@ -656,6 +656,10 @@ Bytes EncodeSignOutputRequest(const SignOutput& output) {
   SetCallback(sign.payload, EncodeBytesValue, output.payload);
   SetKeypath(sign.keypath_count, sign.keypath, output.keypath);
   sign.script_config_index = output.script_config_index;
+  if (output.output_script_config_index.has_value()) {
+    sign.has_output_script_config_index = true;
+    sign.output_script_config_index = *output.output_script_config_index;
+  }
   return EncodeNested(request, shiftcrypto_bitbox02_Request_fields);
 }
 

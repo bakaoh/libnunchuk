@@ -54,6 +54,7 @@ struct PreparedPsbt {
   PartiallySignedTransaction psbt;
   std::vector<std::vector<uint32_t>> signing_account_keypaths;
   std::vector<proto::ScriptConfigWithKeypath> script_configs;
+  std::vector<proto::ScriptConfigWithKeypath> output_script_configs;
   std::vector<proto::SignInput> inputs;
   std::vector<proto::SignOutput> outputs;
   std::vector<PsbtInputKey> keys;

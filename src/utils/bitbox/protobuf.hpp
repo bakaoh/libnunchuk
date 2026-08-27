@@ -19,6 +19,7 @@
 #define NUNCHUK_BITBOX_PROTOBUF_H
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
@@ -42,12 +43,16 @@ struct XPub {
   uint32_t child_number = 0;
   Bytes chain_code;
   Bytes public_key;
+
+  bool operator==(const XPub&) const = default;
 };
 
 struct KeyOrigin {
   Bytes root_fingerprint;
   std::vector<uint32_t> keypath;
   XPub xpub;
+
+  bool operator==(const KeyOrigin&) const = default;
 };
 
 struct ScriptConfig {
@@ -76,11 +81,15 @@ struct ScriptConfig {
   MultisigType multisig_type = MultisigType::P2WSH;
   std::string policy;
   std::vector<KeyOrigin> keys;
+
+  bool operator==(const ScriptConfig&) const = default;
 };
 
 struct ScriptConfigWithKeypath {
   ScriptConfig script_config;
   std::vector<uint32_t> keypath;
+
+  bool operator==(const ScriptConfigWithKeypath&) const = default;
 };
 
 struct SignInput {
@@ -110,6 +119,7 @@ struct SignOutput {
   Bytes payload;
   std::vector<uint32_t> keypath;
   uint32_t script_config_index = 0;
+  std::optional<uint32_t> output_script_config_index;
 };
 
 struct PreviousTransactionInput {

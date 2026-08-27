@@ -62,6 +62,16 @@ bool IsSimpleTaproot(const proto::ScriptConfig& config) {
          config.simple_type == proto::ScriptConfig::SimpleType::P2TR;
 }
 
+bool IsTaproot(const proto::ScriptConfig& config) {
+  return IsSimpleTaproot(config) ||
+         (config.kind == proto::ScriptConfig::Kind::POLICY &&
+          config.policy.rfind("tr(", 0) == 0);
+}
+
+bool IsP2wpkh(const CScript& script) {
+  return script.size() == 22 && script[0] == OP_0 && script[1] == 20;
+}
+
 std::optional<PsbtInputKey> FindKey(
     const PSBTInput& input, std::span<const unsigned char> fingerprint,
     const std::vector<uint32_t>& account_keypath) {
@@ -106,11 +116,12 @@ std::optional<PsbtInputKey> FindKey(
 
 std::optional<PsbtInputKey> FindOutputKey(
     const PSBTOutput& output, std::span<const unsigned char> fingerprint,
-    const std::vector<uint32_t>& account_keypath) {
+    const std::vector<uint32_t>* account_keypath) {
   for (const auto& [xonly, leaf_origin] : output.m_tap_bip32_paths) {
     const auto& [leaf_hashes, origin] = leaf_origin;
     if (!SameFingerprint(origin.fingerprint, fingerprint) ||
-        !MatchesAccountKeypath(origin.path, account_keypath)) {
+        (account_keypath != nullptr &&
+         !MatchesAccountKeypath(origin.path, *account_keypath))) {
       continue;
     }
     const bool internal = !output.m_tap_internal_key.IsNull() &&
@@ -135,13 +146,61 @@ std::optional<PsbtInputKey> FindOutputKey(
   }
   for (const auto& [pubkey, origin] : output.hd_keypaths) {
     if (SameFingerprint(origin.fingerprint, fingerprint) &&
-        MatchesAccountKeypath(origin.path, account_keypath)) {
+        (account_keypath == nullptr ||
+         MatchesAccountKeypath(origin.path, *account_keypath))) {
       return PsbtInputKey{PsbtInputKey::Type::ECDSA, origin.path,
                           std::vector<unsigned char>(pubkey.begin(), pubkey.end()),
                           std::nullopt};
     }
   }
   return std::nullopt;
+}
+
+std::optional<proto::ScriptConfigWithKeypath> InferSimpleOutputConfig(
+    const CTxOut& output, const PSBTOutput& psbt_output,
+    const PsbtInputKey& key) {
+  constexpr uint32_t HARDENED = uint32_t{1} << 31;
+  const auto first_unhardened =
+      std::find_if(key.keypath.begin(), key.keypath.end(),
+                   [](uint32_t child) { return child < HARDENED; });
+  if (first_unhardened == key.keypath.begin() ||
+      std::distance(first_unhardened, key.keypath.end()) != 2) {
+    return std::nullopt;
+  }
+
+  proto::ScriptConfigWithKeypath result;
+  result.keypath.assign(key.keypath.begin(), first_unhardened);
+  result.script_config.kind = proto::ScriptConfig::Kind::SIMPLE;
+  if (IsP2wpkh(output.scriptPubKey)) {
+    if (key.type != PsbtInputKey::Type::ECDSA) return std::nullopt;
+    result.script_config.simple_type =
+        proto::ScriptConfig::SimpleType::P2WPKH;
+  } else if (output.scriptPubKey.IsPayToScriptHash() &&
+             IsP2wpkh(psbt_output.redeem_script)) {
+    if (key.type != PsbtInputKey::Type::ECDSA) return std::nullopt;
+    result.script_config.simple_type =
+        proto::ScriptConfig::SimpleType::P2WPKH_P2SH;
+  } else if (output.scriptPubKey.IsPayToTaproot()) {
+    if (key.type != PsbtInputKey::Type::TAPROOT_KEY_PATH ||
+        !psbt_output.m_tap_tree.empty()) {
+      return std::nullopt;
+    }
+    result.script_config.simple_type = proto::ScriptConfig::SimpleType::P2TR;
+  } else {
+    return std::nullopt;
+  }
+  return result;
+}
+
+uint32_t AddOutputScriptConfig(
+    std::vector<proto::ScriptConfigWithKeypath>& configs,
+    proto::ScriptConfigWithKeypath config) {
+  const auto existing = std::find(configs.begin(), configs.end(), config);
+  if (existing != configs.end()) {
+    return static_cast<uint32_t>(std::distance(configs.begin(), existing));
+  }
+  configs.push_back(std::move(config));
+  return static_cast<uint32_t>(configs.size() - 1);
 }
 
 std::pair<proto::OutputType, std::vector<unsigned char>> OutputPayload(
@@ -157,7 +216,7 @@ std::pair<proto::OutputType, std::vector<unsigned char>> OutputPayload(
   if (script.IsPayToWitnessScriptHash()) {
     return {proto::OutputType::P2WSH, {script.begin() + 2, script.end()}};
   }
-  if (script.size() == 22 && script[0] == OP_0 && script[1] == 20) {
+  if (IsP2wpkh(script)) {
     return {proto::OutputType::P2WPKH, {script.begin() + 2, script.end()}};
   }
   if (script.IsPayToTaproot()) {
@@ -248,6 +307,7 @@ PreparedPsbt PreparePsbt(const std::string& encoded, const Wallet& wallet,
       ScriptConfigForAccount(wallet_config, signing_account_index),
       signing_account_keypath};
   const bool simple_taproot = IsSimpleTaproot(script_config.script_config);
+  const bool taproot_config = IsTaproot(script_config.script_config);
   if (simple_taproot && FirmwareBefore(firmware_version, 9, 10, 0)) {
     throw std::invalid_argument(
         "BitBox Taproot signing requires firmware 9.10.0 or newer");
@@ -278,13 +338,13 @@ PreparedPsbt PreparePsbt(const std::string& encoded, const Wallet& wallet,
     if (!result.psbt.GetInputUTXO(utxo, index)) {
       throw std::invalid_argument("BitBox PSBT input is missing its UTXO");
     }
-    const bool taproot = key->type != PsbtInputKey::Type::ECDSA;
-    if (taproot && psbt_input.sighash_type.has_value() &&
+    const bool taproot_input = key->type != PsbtInputKey::Type::ECDSA;
+    if (taproot_input && psbt_input.sighash_type.has_value() &&
         *psbt_input.sighash_type != SIGHASH_DEFAULT) {
       throw std::invalid_argument(
           "BitBox Taproot inputs require SIGHASH_DEFAULT");
     }
-    if (!taproot && psbt_input.sighash_type.has_value() &&
+    if (!taproot_input && psbt_input.sighash_type.has_value() &&
         *psbt_input.sighash_type != SIGHASH_ALL) {
       throw std::invalid_argument(
           "BitBox ECDSA inputs require SIGHASH_ALL");
@@ -293,10 +353,9 @@ PreparedPsbt PreparePsbt(const std::string& encoded, const Wallet& wallet,
       throw std::invalid_argument(
           "BitBox PSBT inputs must have a nonzero value");
     }
-    // Match BTCSignNeedsPrevTxs() in the official SDK. Only a simple P2TR
-    // transaction is guaranteed not to need previous transactions across
-    // supported firmware versions.
-    if (!simple_taproot && !psbt_input.non_witness_utxo) {
+    // Match BTCSignNeedsPrevTxs() in the official SDK. Previous transactions
+    // are not needed when all inputs use a Taproot script config.
+    if (!taproot_config && !psbt_input.non_witness_utxo) {
       throw std::invalid_argument(
           "BitBox requires non-witness UTXOs for this wallet type");
     }
@@ -319,27 +378,56 @@ PreparedPsbt PreparePsbt(const std::string& encoded, const Wallet& wallet,
       throw std::invalid_argument("BitBox PSBT output has a negative value");
     }
     output.value = tx_output.nValue;
-    const auto key =
-        FindOutputKey(psbt_output, fingerprint, signing_account_keypath);
+    auto key =
+        FindOutputKey(psbt_output, fingerprint, &signing_account_keypath);
     const bool same_account = key.has_value();
+    std::optional<proto::ScriptConfigWithKeypath> output_script_config;
+    if (!same_account && FirmwareAtLeast(firmware_version, 9, 22, 0)) {
+      for (size_t account_index = 0;
+           account_index < wallet_config.accounts.size(); ++account_index) {
+        if (account_index == signing_account_index) continue;
+        const auto& account = wallet_config.accounts[account_index];
+        key = FindOutputKey(psbt_output, fingerprint, &account.keypath);
+        if (key.has_value()) {
+          output_script_config = proto::ScriptConfigWithKeypath{
+              ScriptConfigForAccount(wallet_config, account_index),
+              account.keypath};
+          break;
+        }
+      }
+      if (!key.has_value() &&
+          wallet_config.script_config.kind ==
+              proto::ScriptConfig::Kind::SIMPLE) {
+        key = FindOutputKey(psbt_output, fingerprint, nullptr);
+        if (key.has_value()) {
+          output_script_config =
+              InferSimpleOutputConfig(tx_output, psbt_output, *key);
+        }
+      }
+    }
     if (same_account &&
         wallet_config.script_config.kind == proto::ScriptConfig::Kind::POLICY &&
         FirmwareBefore(firmware_version, 9, 15, 0)) {
       throw std::invalid_argument(
           "BitBox wallet-policy outputs require firmware 9.15.0 or newer");
     }
-    const bool internal =
+    const bool internal_same_account =
         same_account &&
         (!FirmwareBefore(firmware_version, 9, 15, 0) ||
          IsChangeKeypath(key->keypath));
-    if (internal) {
+    if (internal_same_account || output_script_config.has_value()) {
       if (tx_output.nValue == 0) {
         throw std::invalid_argument(
             "BitBox regular outputs must have a nonzero value");
       }
       output.ours = true;
       output.keypath = key->keypath;
-      output.script_config_index = 0;
+      if (output_script_config.has_value()) {
+        output.output_script_config_index = AddOutputScriptConfig(
+            result.output_script_configs, std::move(*output_script_config));
+      } else {
+        output.script_config_index = 0;
+      }
     } else {
       const auto [type, payload] =
           OutputPayload(tx_output.scriptPubKey, firmware_version);
