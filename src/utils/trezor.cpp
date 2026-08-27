@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <util/bip32.h>
 #include "nunchuk.h"
 #include "tinyformat.h"
 #include "utils/httplib.h"
@@ -525,12 +526,25 @@ std::string TrezorParseSignTransactionResponse(const Wallet &wallet,
   return EncodePsbt(psbt);
 }
 
+static std::string TrezorSignMessagePath(const SingleSigner &signer) {
+  std::string formalized_path = signer.get_derivation_path();
+  std::replace(formalized_path.begin(), formalized_path.end(), 'h', '\'');
+  std::vector<uint32_t> keypath;
+  constexpr uint32_t hardened = uint32_t{1} << 31;
+  if (ParseHDKeypath(formalized_path, keypath) && !keypath.empty() &&
+      std::all_of(keypath.begin(), keypath.end(),
+                  [hardened](uint32_t child) {
+                    return child >= hardened;
+                  })) {
+    formalized_path += "/0/0";
+  }
+  return formalized_path;
+}
+
 std::string TrezorSignMessage(const SingleSigner &signer,
                               const std::string &message) {
   int id = TrezorNextId();
-  std::string formalized_path = signer.get_derivation_path();
-  std::replace(formalized_path.begin(), formalized_path.end(), 'h', '\'');
-  formalized_path += "/0/0";
+  const auto formalized_path = TrezorSignMessagePath(signer);
   json params = {
       {"path", formalized_path},
       {"coin", Utils::GetChain() == Chain::MAIN ? "btc" : "test"},
@@ -548,9 +562,7 @@ std::string TrezorSignMessage(const SingleSigner &signer,
 }
 
 std::string TrezorGetSignMessagePath(const SingleSigner &signer) {
-  std::string formalized_path = signer.get_derivation_path();
-  std::replace(formalized_path.begin(), formalized_path.end(), 'h', '\'');
-  return formalized_path + "/0/0";
+  return TrezorSignMessagePath(signer);
 }
 
 std::pair<std::string, std::string> TrezorParseSignMessage(
