@@ -44,14 +44,14 @@ int64_t Timelock::k() const {
     return value_;
   } else {
     if (based_ == Based::TIME_LOCK) {
-      if (value_ < 0 || value_ >= 33554431) {
+      if (value_ < 0 || value_ > 33554431) {
         throw NunchukException(NunchukException::INVALID_PARAMETER,
                                "Invalid time value");
       }
       return (value_ >> CTxIn::SEQUENCE_LOCKTIME_GRANULARITY) |
              CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG;
     } else if (based_ == Based::HEIGHT_LOCK) {
-      if (value_ < 0 || value_ >= 65535) {
+      if (value_ < 0 || value_ > 65535) {
         throw NunchukException(NunchukException::INVALID_PARAMETER,
                                "Invalid height value");
       }
