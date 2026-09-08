@@ -226,6 +226,7 @@ enum class SignerTag {
   LEDGER,
   BITBOX,
   KEEPKEY,
+  KRUX,
 };
 
 enum class PreimageHashType {
@@ -1563,6 +1564,8 @@ class NUNCHUK_EXPORT Nunchuk {
   virtual std::string GetLedgerWalletHmac(const std::string& wallet_id) = 0;
   virtual bool SetLedgerWalletHmac(const std::string& wallet_id,
                                    const std::string& hmac) = 0;
+  virtual std::string GetBitBoxPairingData() = 0;
+  virtual bool SetBitBoxPairingData(const std::string& data) = 0;
   virtual bool ExportWallet(const std::string& wallet_id,
                             const std::string& file_path,
                             ExportFormat format) = 0;
